@@ -1,0 +1,5 @@
+[env]
+build_flags =
+    -D WIFI_SSID='"Freebox-123"'
+    -D WIFI_PASS='"123456789"'
+    -D MQTT_SERVER='"192.168.0.1"'
