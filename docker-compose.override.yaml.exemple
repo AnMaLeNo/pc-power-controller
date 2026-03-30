@@ -1,0 +1,10 @@
+services:
+  api:
+    build:
+      context: ./power-pc-api
+      target: development
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./power-pc-api:/usr/src/app
+      - /usr/src/app/node_modules

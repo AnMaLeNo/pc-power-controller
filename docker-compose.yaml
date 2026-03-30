@@ -1,0 +1,30 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.1-alpine
+    container_name: mqtt_broker
+    restart: always
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+    networks:
+      - iot_net
+
+  api:
+    build:
+      context: ./power-pc-api
+      target: production
+    container_name: power_api
+    restart: always
+    environment:
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - NODE_ENV=production
+    depends_on:
+      - mosquitto
+    networks:
+      - iot_net
+
+networks:
+  iot_net:
+    driver: bridge
