@@ -4,3 +4,4 @@ docker-compose.override.yaml
 config.ini
 dist/
 .vite/
+mosquitto/config/pc-power-controller.code-workspace
