@@ -25,6 +25,19 @@ services:
     networks:
       - iot_net
 
+  frontend:
+    build:
+      context: ./frontend
+      target: production
+    container_name: power_frontend
+    restart: always
+    ports:
+      - "18080:5173"
+    depends_on:
+      - api
+    networks:
+      - iot_net
+
 networks:
   iot_net:
     driver: bridge
