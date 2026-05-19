@@ -3,6 +3,9 @@
 ![C++](https://img.shields.io/badge/C++-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-43853D?style=for-the-badge&logo=node.js&logoColor=white)
 ![Fastify](https://img.shields.io/badge/Fastify-000000?style=for-the-badge&logo=fastify&logoColor=white)
+![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 ![MQTT](https://img.shields.io/badge/MQTT-660066?style=for-the-badge&logo=mqtt&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 
@@ -16,15 +19,17 @@ Ce projet permet d'allumer, d'éteindre ou de forcer l'arrêt d'un ordinateur à
 - **Contrôle physique sécurisé :** Utilisation d'un optocoupleur connecté à un ESP8266 pour isoler électriquement le circuit du microcontrôleur de celui de la carte mère.
 - **Communication Temps Réel :** Utilisation d'un broker MQTT (Eclipse Mosquitto) pour transmettre les commandes de l'API vers le microcontrôleur presque instantanément.
 - **API REST Robuste :** Développée avec Fastify pour des performances optimales, incluant la validation des schémas de requêtes.
-- **Déploiement Facilité :** Conteneurisation complète du backend (API + Broker MQTT) via Docker Compose.
+- **Interface Web Typée :** Application React + TypeScript construite avec Vite, proposant un pupitre de commande adapté au contrôle physique du PC.
+- **Déploiement Facilité :** Conteneurisation complète de la stack (Frontend + API + Broker MQTT) via Docker Compose.
 
 ## Architecture du Système
 
-Le projet est divisé en trois composants majeurs :
+Le projet est divisé en quatre composants majeurs :
+1. **Frontend Web (React / TypeScript / Vite) :** Fournit une interface de commande responsive, servie par Nginx en production et reliée à l'API via un proxy `/api`.
 
-1. **Backend API (Node.js / Fastify) :** Reçoit les requêtes HTTP (ex: `SHORT_PRESS` ou `LONG_PRESS`) et les publie sur le topic MQTT `bureau/pc/power/set`.
-2. **Broker MQTT (Eclipse Mosquitto) :** Agit comme un intermédiaire léger pour distribuer les messages entre l'API et le hardware.
-3. **Firmware ESP8266 (C++ / Arduino) :** Connecté au réseau WiFi local, il s'abonne au topic MQTT. À la réception d'un message, il déclenche une impulsion (High/Low) d'une durée spécifique (300ms pour un appui court, 6000ms pour un appui long) sur la broche `D1` reliée à l'optocoupleur.
+2. **Backend API (Node.js / Fastify) :** Reçoit les requêtes HTTP (ex: `SHORT_PRESS` ou `LONG_PRESS`) et les publie sur le topic MQTT `bureau/pc/power/set`.
+3. **Broker MQTT (Eclipse Mosquitto) :** Agit comme un intermédiaire léger pour distribuer les messages entre l'API et le hardware.
+4. **Firmware ESP8266 (C++ / Arduino) :** Connecté au réseau WiFi local, il s'abonne au topic MQTT. À la réception d'un message, il déclenche une impulsion (High/Low) d'une durée spécifique (300ms pour un appui court, 6000ms pour un appui long) sur la broche `D1` reliée à l'optocoupleur.
 
 ## Installation & Lancement
 
@@ -33,13 +38,16 @@ Le code source se trouve dans le dossier `esp8266/`. Le projet est configuré av
 - Copiez `config.ini.exemple` vers `config.ini` et ajoutez vos identifiants WiFi ainsi que l'IP de votre serveur MQTT.
 - Compilez et téléversez le code C++ sur votre Wemos D1 Mini / ESP8266.
 
-### 2. Lancement du Backend (API + MQTT)
+### 2. Lancement de la stack Docker
 Assurez-vous d'avoir [Docker](https://www.docker.com/) et Docker Compose installés sur votre machine ou votre serveur cible (ex: Raspberry Pi).
 
 ```bash
 # Clonez le dépôt
-git clone [https://github.com/AnMaLeNo/pc-power-controller.git](https://github.com/AnMaLeNo/pc-power-controller.git)
+git clone https://github.com/AnMaLeNo/pc-power-controller.git
 cd pc-power-controller
 
 # Lancez les conteneurs en tâche de fond
-docker-compose up -d --build
+docker compose up -d --build
+```
+
+L'interface web est disponible sur `http://localhost:18080`. En mode développement avec l'override Docker Compose, Vite est aussi exposé sur `http://localhost:5174`.
