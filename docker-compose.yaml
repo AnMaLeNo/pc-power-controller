@@ -9,6 +9,12 @@ services:
       - ./mosquitto/config:/mosquitto/config
     networks:
       - iot_net
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -W 3 -i healthcheck || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
   api:
     build:
@@ -21,9 +27,16 @@ services:
       - MQTT_PORT=1883
       - NODE_ENV=production
     depends_on:
-      - mosquitto
+      mosquitto:
+        condition: service_healthy
     networks:
       - iot_net
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
   frontend:
     build:
@@ -34,9 +47,16 @@ services:
     ports:
       - "18080:5173"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     networks:
       - iot_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:5173/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
 networks:
   iot_net:
