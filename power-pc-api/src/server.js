@@ -1,7 +1,11 @@
 const fastify = require('fastify')({ logger: true });
 const mqtt = require('mqtt');
 
-const mqttClient = mqtt.connect(`mqtt://${process.env.MQTT_HOST}:${process.env.MQTT_PORT}`);
+const PORT = Number(process.env.PORT) || 3000;
+const MQTT_HOST = process.env.MQTT_HOST || 'localhost';
+const MQTT_PORT = Number(process.env.MQTT_PORT) || 1883;
+
+const mqttClient = mqtt.connect(`mqtt://${MQTT_HOST}:${MQTT_PORT}`);
 
 mqttClient.on('connect', () => {
   fastify.log.info('Connecté au Broker MQTT');
@@ -97,7 +101,7 @@ const closeGracefully = async (signal) => {
 
 const start = async () => {
   try {
-    await fastify.listen({ port: 3000, host: '0.0.0.0' });
+    await fastify.listen({ port: PORT, host: '0.0.0.0' });
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
