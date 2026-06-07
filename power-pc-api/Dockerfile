@@ -13,4 +13,5 @@ FROM base as production
 ENV NODE_ENV=production
 RUN npm ci --only=production && npm cache clean --force;
 COPY --chown=node:node . .
+EXPOSE 3000
 CMD ["node", "./src/server.js"]
