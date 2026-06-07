@@ -9,7 +9,7 @@ import {
   ShieldAlert,
   Wifi
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 type PowerAction = 'SHORT_PRESS' | 'LONG_PRESS';
 type RequestState = 'idle' | 'pending' | 'success' | 'error';
@@ -25,6 +25,12 @@ type CommandLog = {
   id: string;
   action: PowerAction;
   status: Exclude<RequestState, 'idle' | 'pending'>;
+  message: string;
+  timestamp: Date;
+};
+
+type DeviceEvent = {
+  id: string;
   message: string;
   timestamp: Date;
 };
@@ -73,6 +79,37 @@ export default function App() {
   const [lastResult, setLastResult] = useState<CommandLog | null>(null);
   const [logs, setLogs] = useState<CommandLog[]>([]);
   const [confirmLongPress, setConfirmLongPress] = useState(false);
+  const [deviceEvents, setDeviceEvents] = useState<DeviceEvent[]>([]);
+  const [streamConnected, setStreamConnected] = useState(false);
+
+  // Flux SSE : retours réels de l'ESP relayés par l'API (topic bureau/pc/power/log)
+  useEffect(() => {
+    const source = new EventSource('/api/events');
+
+    source.onopen = () => setStreamConnected(true);
+
+    source.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as { message: string; timestamp: string };
+        setDeviceEvents((current) =>
+          [
+            {
+              id: crypto.randomUUID(),
+              message: data.message,
+              timestamp: new Date(data.timestamp)
+            },
+            ...current
+          ].slice(0, 12)
+        );
+      } catch {
+        // payload non-JSON ignoré
+      }
+    };
+
+    source.onerror = () => setStreamConnected(false);
+
+    return () => source.close();
+  }, []);
 
   const statusTone = useMemo(() => {
     if (requestState === 'success') return 'success';
@@ -228,6 +265,37 @@ export default function App() {
                   <small>{entry.message}</small>
                 </span>
                 <time>{timeFormatter.format(entry.timestamp)}</time>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
+      <section className="activity-panel" aria-labelledby="device-title">
+        <div className="activity-heading">
+          <h2 id="device-title">Retours du PC</h2>
+          <span className={`stream-pill ${streamConnected ? 'success' : 'error'}`}>
+            {streamConnected ? 'Flux connecté' : 'Flux hors ligne'}
+          </span>
+        </div>
+
+        {deviceEvents.length === 0 ? (
+          <div className="empty-state">
+            <Activity aria-hidden="true" />
+            <span>En attente de retour du contrôleur</span>
+          </div>
+        ) : (
+          <ol className="log-list">
+            {deviceEvents.map((event) => (
+              <li key={event.id}>
+                <span className="log-icon">
+                  <ServerCog aria-hidden="true" />
+                </span>
+                <span className="log-body">
+                  <strong>ESP8266</strong>
+                  <small>{event.message}</small>
+                </span>
+                <time>{timeFormatter.format(event.timestamp)}</time>
               </li>
             ))}
           </ol>

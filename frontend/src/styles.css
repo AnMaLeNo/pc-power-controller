@@ -117,6 +117,28 @@ h2 {
   white-space: nowrap;
 }
 
+.stream-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.stream-pill.success {
+  color: var(--green);
+  border-color: rgb(22 135 84 / 28%);
+  background: var(--green-soft);
+}
+
+.stream-pill.error {
+  color: var(--red);
+  border-color: rgb(199 53 53 / 28%);
+  background: var(--red-soft);
+}
+
 .status-pill svg,
 .result-line svg,
 .metric svg,
