@@ -52,6 +52,14 @@ const powerSchema = {
   }
 };
 
+fastify.get('/health', async (request, reply) => {
+  const mqttUp = mqttClient.connected;
+  reply.code(mqttUp ? 200 : 503).send({
+    status: mqttUp ? 'ok' : 'degraded',
+    mqtt: mqttUp ? 'connected' : 'disconnected'
+  });
+});
+
 fastify.post('/api/power', { schema: powerSchema }, async (request, reply) => {
   const { action } = request.body;
   const topic = 'bureau/pc/power/set';
