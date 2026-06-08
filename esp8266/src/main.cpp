@@ -38,7 +38,11 @@ enum NetworkState {
 
 NetworkState netState = NET_INIT;
 uint32_t lastNetworkAttempt = 0;
-const uint32_t NETWORK_TIMEOUT = 5000; // Constante temporelle (5000 ms) pour les timeouts et délais de reprise
+// Timeout d'association WiFi + DHCP : assez large pour les box lentes (sinon
+// l'ESP abandonne avant la fin de la négociation et boucle indéfiniment).
+const uint32_t WIFI_CONNECT_TIMEOUT = 20000;
+// Délai de temporisation avant une nouvelle tentative après un échec.
+const uint32_t COOLDOWN_DURATION = 5000;
 
 char buffer[50];
 const uint16_t MESSAGE_MAX_LENGHT = 20;
@@ -126,7 +130,7 @@ void processNetworkFSM() {
             if (WiFi.status() == WL_CONNECTED) {
                 Serial.printf("\nWiFi connecté. IP: %s\n", WiFi.localIP().toString().c_str());
                 netState = NET_MQTT_CONNECTING;
-            } else if (now - lastNetworkAttempt >= NETWORK_TIMEOUT) {
+            } else if (now - lastNetworkAttempt >= WIFI_CONNECT_TIMEOUT) {
                 Serial.println("\nTimeout WiFi. Bascule en Cooldown.");
                 WiFi.disconnect();
                 lastNetworkAttempt = now;
@@ -170,7 +174,7 @@ void processNetworkFSM() {
 
         case NET_COOLDOWN:
             // Interdiction stricte de toute opération réseau pendant la fenêtre de temporisation
-            if (now - lastNetworkAttempt >= NETWORK_TIMEOUT) {
+            if (now - lastNetworkAttempt >= COOLDOWN_DURATION) {
                 netState = (WiFi.status() == WL_CONNECTED) ? NET_MQTT_CONNECTING : NET_WIFI_CONNECTING;
             }
             break;
