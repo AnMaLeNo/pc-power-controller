@@ -13,6 +13,15 @@ const TOPIC_LOG = 'bureau/pc/power/log';
 // Clients SSE connectés (réponses HTTP gardées ouvertes pour le push temps réel)
 const sseClients = new Set();
 
+// Heartbeat SSE : un commentaire (`:`) ignoré par EventSource mais qui génère
+// du trafic. Garde la connexion vivante à travers les proxies et fait échouer
+// l'écriture sur un client mort -> détection des connexions zombies.
+const SSE_HEARTBEAT_MS = 30000;
+const heartbeat = setInterval(() => {
+  for (const client of sseClients) client.raw.write(': ping\n\n');
+}, SSE_HEARTBEAT_MS);
+heartbeat.unref();
+
 mqttClient.on('connect', () => {
   fastify.log.info('Connecté au Broker MQTT');
   mqttClient.subscribe(TOPIC_LOG, (err) => {
@@ -130,6 +139,7 @@ fastify.get('/api/events', (request, reply) => {
 const closeGracefully = async (signal) => {
   fastify.log.info(`Signal ${signal} reçu. Arrêt en cours...`);
 
+  clearInterval(heartbeat);
   for (const client of sseClients) client.raw.end();
   sseClients.clear();
 
