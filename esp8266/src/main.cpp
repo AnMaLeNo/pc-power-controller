@@ -45,7 +45,7 @@ const uint32_t WIFI_CONNECT_TIMEOUT = 20000;
 const uint32_t COOLDOWN_DURATION = 5000;
 
 char buffer[50];
-const uint16_t MESSAGE_MAX_LENGHT = 20;
+const uint16_t MESSAGE_MAX_LENGTH = 20;
 
 // Déclaration préalable des fonctions
 void startPulse(uint32_t duration);
@@ -53,9 +53,9 @@ void handlePulse();
 void processNetworkFSM();
 
 void callback(char* topic, byte* payload, unsigned int length) {
-    char message[MESSAGE_MAX_LENGHT + 1];
-    if (length > MESSAGE_MAX_LENGHT) {
-        snprintf(buffer, sizeof(buffer), "message trop grand, size: %d, max: %d", length, MESSAGE_MAX_LENGHT);
+    char message[MESSAGE_MAX_LENGTH + 1];
+    if (length > MESSAGE_MAX_LENGTH) {
+        snprintf(buffer, sizeof(buffer), "message trop grand, size: %d, max: %d", length, MESSAGE_MAX_LENGTH);
         mqttClient.publish(topic_state, buffer);
         Serial.println(buffer);
         return;
