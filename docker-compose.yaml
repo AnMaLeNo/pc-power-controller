@@ -55,9 +55,7 @@ services:
     networks:
       - iot_net
     healthcheck:
-      # 127.0.0.1 explicite et non "localhost" : busybox wget tente ::1 (IPv6) en
-      # premier sur localhost, or nginx n'écoute qu'en IPv4 (0.0.0.0:5173) -> le
-      # healthcheck échouait à tort et marquait le conteneur unhealthy.
+      # 127.0.0.1 (et non "localhost") : nginx n'écoute qu'en IPv4, busybox wget résoudrait localhost en ::1 d'abord.
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5173/ || exit 1"]
       interval: 10s
       timeout: 5s
