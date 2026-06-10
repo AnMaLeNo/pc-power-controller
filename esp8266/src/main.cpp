@@ -25,6 +25,8 @@ const uint32_t SHORT_PRESS_DURATION = 300;
 const uint32_t LONG_PRESS_DURATION = 6000;
 uint32_t pulseStartTime = 0;
 uint32_t pulseDuration = 0;
+// Action en cours, conservée pour corréler l'ACK pulse_end à la commande.
+char pulseAction[16] = "";
 
 // Définition des états de l'automate réseau (FSM)
 enum NetworkState {
@@ -44,20 +46,20 @@ const uint32_t WIFI_CONNECT_TIMEOUT = 20000;
 // Délai de temporisation avant une nouvelle tentative après un échec.
 const uint32_t COOLDOWN_DURATION = 5000;
 
-char buffer[50];
+// Dimensionné pour le plus long ACK JSON (pulse_start/end avec action + ts 32 bits).
+char buffer[80];
 const uint16_t MESSAGE_MAX_LENGTH = 20;
 
 // Déclaration préalable des fonctions
-void startPulse(uint32_t duration);
+void startPulse(uint32_t duration, const char* action);
 void handlePulse();
 void processNetworkFSM();
 
 void callback(char* topic, byte* payload, unsigned int length) {
     char message[MESSAGE_MAX_LENGTH + 1];
     if (length > MESSAGE_MAX_LENGTH) {
-        snprintf(buffer, sizeof(buffer), "message trop grand, size: %d, max: %d", length, MESSAGE_MAX_LENGTH);
-        mqttClient.publish(topic_state, buffer);
-        Serial.println(buffer);
+        mqttClient.publish(topic_state, "{\"event\":\"error\",\"reason\":\"payload_too_large\"}");
+        Serial.printf("payload trop grand, size: %d, max: %d\n", length, MESSAGE_MAX_LENGTH);
         return;
     }
 
@@ -67,28 +69,31 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
     if (strcmp(topic, topic_command) == 0) {
         if (strcmp(message, "SHORT_PRESS") == 0) {
-            startPulse(SHORT_PRESS_DURATION);
+            startPulse(SHORT_PRESS_DURATION, "SHORT_PRESS");
         } else if (strcmp(message, "LONG_PRESS") == 0) {
-            startPulse(LONG_PRESS_DURATION);
+            startPulse(LONG_PRESS_DURATION, "LONG_PRESS");
         } else {
+            mqttClient.publish(topic_state, "{\"event\":\"error\",\"reason\":\"unknown_command\"}");
             Serial.printf("Message [%s] inconnu\n", message);
         }
     }
 }
 
-void startPulse(uint32_t duration) {
+void startPulse(uint32_t duration, const char* action) {
     if (pulseActive) {
-        mqttClient.publish(topic_state, "Pulse already active");
+        mqttClient.publish(topic_state, "{\"event\":\"error\",\"reason\":\"pulse_already_active\"}");
         Serial.print("Pulse already active\n");
         return;
     }
     pulseDuration = duration;
+    snprintf(pulseAction, sizeof(pulseAction), "%s", action);
     digitalWrite(pinOpto, HIGH);
     digitalWrite(pinLed, LOW);
-    
-    snprintf(buffer, sizeof(buffer), "Start pulse at %lu", millis());
+
+    snprintf(buffer, sizeof(buffer),
+             "{\"event\":\"pulse_start\",\"action\":\"%s\",\"ts\":%lu}", action, millis());
     mqttClient.publish(topic_state, buffer);
-    
+
     pulseStartTime = millis();
     pulseActive = true;
     Serial.print("Start pulse\n");
@@ -99,9 +104,10 @@ void handlePulse() {
         digitalWrite(pinOpto, LOW);
         digitalWrite(pinLed, HIGH);
         pulseActive = false;
-        
+
         if (mqttClient.connected()) {
-            snprintf(buffer, sizeof(buffer), "End pulse at %lu", millis());
+            snprintf(buffer, sizeof(buffer),
+                     "{\"event\":\"pulse_end\",\"action\":\"%s\",\"ts\":%lu}", pulseAction, millis());
             mqttClient.publish(topic_state, buffer);
         }
         Serial.print("End pulse\n");
