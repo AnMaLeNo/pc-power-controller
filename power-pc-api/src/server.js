@@ -34,15 +34,30 @@ mqttClient.on('error', (err) => {
   fastify.log.error('Erreur MQTT:', err);
 });
 
-// Relais des retours de l'ESP (topic log) vers tous les clients SSE connectés
+// Relais des retours de l'ESP (topic log) vers tous les clients SSE connectés.
+// L'ESP publie un JSON structuré ({event, action?, ts?, reason?}). L'API le
+// décode et expose un objet typé au front. Fallback: si le payload n'est pas du
+// JSON (ancien firmware), on le relaie en texte brut pour ne pas perdre l'info.
 mqttClient.on('message', (topic, payload) => {
   if (topic !== TOPIC_LOG) return;
-  const event = JSON.stringify({
-    message: payload.toString(),
-    timestamp: new Date().toISOString()
-  });
+  const raw = payload.toString();
+
+  let event;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.event === 'string') {
+      event = { ...parsed, timestamp: new Date().toISOString() };
+    }
+  } catch {
+    // payload non-JSON : fallback texte brut
+  }
+  if (!event) {
+    event = { event: 'raw', message: raw, timestamp: new Date().toISOString() };
+  }
+
+  const data = JSON.stringify(event);
   for (const client of sseClients) {
-    client.raw.write(`data: ${event}\n\n`);
+    client.raw.write(`data: ${data}\n\n`);
   }
 });
 
