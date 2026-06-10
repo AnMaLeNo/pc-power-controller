@@ -31,7 +31,9 @@ type CommandLog = {
 
 type DeviceEvent = {
   id: string;
-  message: string;
+  kind: 'pulse_start' | 'pulse_end' | 'error' | 'raw';
+  label: string;
+  isError: boolean;
   timestamp: Date;
 };
 
@@ -39,6 +41,36 @@ const actionLabels: Record<PowerAction, string> = {
   SHORT_PRESS: 'Appui court',
   LONG_PRESS: 'Appui long'
 };
+
+// Événement structuré reçu de l'ESP (relayé tel quel par l'API via SSE).
+type EspEvent = {
+  event: 'pulse_start' | 'pulse_end' | 'error' | 'raw';
+  action?: PowerAction;
+  reason?: string;
+  message?: string;
+  timestamp: string;
+};
+
+const errorReasons: Record<string, string> = {
+  pulse_already_active: 'Impulsion déjà en cours',
+  unknown_command: 'Commande inconnue',
+  payload_too_large: 'Message trop volumineux'
+};
+
+// Transforme l'événement ESP en libellé lisible pour l'UI.
+function describeEspEvent(data: EspEvent): { label: string; isError: boolean } {
+  const actionLabel = data.action ? actionLabels[data.action] : null;
+  switch (data.event) {
+    case 'pulse_start':
+      return { label: actionLabel ? `Impulsion démarrée — ${actionLabel}` : 'Impulsion démarrée', isError: false };
+    case 'pulse_end':
+      return { label: actionLabel ? `Impulsion terminée — ${actionLabel}` : 'Impulsion terminée', isError: false };
+    case 'error':
+      return { label: errorReasons[data.reason ?? ''] ?? `Erreur : ${data.reason ?? 'inconnue'}`, isError: true };
+    default:
+      return { label: data.message ?? 'Événement', isError: false };
+  }
+}
 
 const actionDescriptions: Record<PowerAction, string> = {
   SHORT_PRESS: '300 ms',
@@ -90,13 +122,16 @@ export default function App() {
 
     source.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data) as { message: string; timestamp: string };
+        const data = JSON.parse(event.data) as EspEvent;
+        const { label, isError } = describeEspEvent(data);
         setDeviceEvents((current) =>
           [
             {
               id: crypto.randomUUID(),
-              message: data.message,
-              timestamp: new Date(data.timestamp)
+              kind: data.event,
+              label,
+              isError,
+              timestamp: data.timestamp ? new Date(data.timestamp) : new Date()
             },
             ...current
           ].slice(0, 12)
@@ -287,13 +322,17 @@ export default function App() {
         ) : (
           <ol className="log-list">
             {deviceEvents.map((event) => (
-              <li key={event.id}>
+              <li key={event.id} className={event.isError ? 'error' : undefined}>
                 <span className="log-icon">
-                  <ServerCog aria-hidden="true" />
+                  {event.isError ? (
+                    <CircleAlert aria-hidden="true" />
+                  ) : (
+                    <ServerCog aria-hidden="true" />
+                  )}
                 </span>
                 <span className="log-body">
                   <strong>ESP8266</strong>
-                  <small>{event.message}</small>
+                  <small>{event.label}</small>
                 </span>
                 <time>{timeFormatter.format(event.timestamp)}</time>
               </li>
