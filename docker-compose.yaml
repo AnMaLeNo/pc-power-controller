@@ -55,7 +55,7 @@ services:
     networks:
       - iot_net
     healthcheck:
-      # 127.0.0.1 (et non "localhost") : nginx n'écoute qu'en IPv4, busybox wget résoudrait localhost en ::1 d'abord.
+      # IP littérale (et non "localhost") pour un check déterministe : localhost peut résoudre ::1 d'abord, que busybox wget n'essaie pas en fallback.
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5173/ || exit 1"]
       interval: 10s
       timeout: 5s
