@@ -1,18 +1,23 @@
-import {
-  Activity,
-  CheckCircle2,
-  CircleAlert,
-  Clock3,
-  LoaderCircle,
-  Power,
-  ServerCog,
-  ShieldAlert,
-  Wifi
-} from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { LoaderCircle, Moon, Power, ShieldAlert, Sun } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 type PowerAction = 'SHORT_PRESS' | 'LONG_PRESS';
 type RequestState = 'idle' | 'pending' | 'success' | 'error';
+type Theme = 'dark' | 'light';
+
+const THEME_STORAGE_KEY = 'pc-power-theme';
+const themeColors: Record<Theme, string> = {
+  dark: '#0a0a0c',
+  light: '#f7f7f8'
+};
+
+// Le script inline d'index.html applique le thème avant le premier rendu
+// (anti-flash) ; on relit l'attribut pour démarrer React synchronisé.
+function getInitialTheme(): Theme {
+  const applied = document.documentElement.dataset.theme;
+  if (applied === 'light' || applied === 'dark') return applied;
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
 
 type ApiSuccess = {
   status: string;
@@ -40,6 +45,11 @@ type DeviceEvent = {
 const actionLabels: Record<PowerAction, string> = {
   SHORT_PRESS: 'Appui court',
   LONG_PRESS: 'Appui long'
+};
+
+const actionDurations: Record<PowerAction, string> = {
+  SHORT_PRESS: '300 ms',
+  LONG_PRESS: '6 s'
 };
 
 // Événement structuré reçu de l'ESP (relayé tel quel par l'API via SSE).
@@ -71,11 +81,6 @@ function describeEspEvent(data: EspEvent): { label: string; isError: boolean } {
       return { label: data.message ?? 'Événement', isError: false };
   }
 }
-
-const actionDescriptions: Record<PowerAction, string> = {
-  SHORT_PRESS: '300 ms',
-  LONG_PRESS: '6 s'
-};
 
 const timeFormatter = new Intl.DateTimeFormat('fr-FR', {
   hour: '2-digit',
@@ -113,6 +118,20 @@ export default function App() {
   const [confirmLongPress, setConfirmLongPress] = useState(false);
   const [deviceEvents, setDeviceEvents] = useState<DeviceEvent[]>([]);
   const [streamConnected, setStreamConnected] = useState(false);
+  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', themeColors[theme]);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // stockage indisponible (navigation privée) : le choix vaut pour la session
+    }
+  }, [theme]);
 
   // Flux SSE : retours réels de l'ESP relayés par l'API (topic bureau/pc/power/log)
   useEffect(() => {
@@ -146,12 +165,16 @@ export default function App() {
     return () => source.close();
   }, []);
 
-  const statusTone = useMemo(() => {
-    if (requestState === 'success') return 'success';
-    if (requestState === 'error') return 'error';
-    if (requestState === 'pending') return 'pending';
-    return 'idle';
-  }, [requestState]);
+  // Modale : focus initial sur « Annuler » et fermeture via Échap.
+  useEffect(() => {
+    if (!confirmLongPress) return;
+    cancelButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setConfirmLongPress(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [confirmLongPress]);
 
   const runCommand = async (action: PowerAction) => {
     setRequestState('pending');
@@ -190,186 +213,208 @@ export default function App() {
 
   const isBusy = requestState === 'pending';
 
+  const status = useMemo(() => {
+    if (requestState === 'pending' && pendingAction) {
+      return {
+        tone: 'pending',
+        label: 'Transmission…',
+        detail: `${actionLabels[pendingAction]} · ${actionDurations[pendingAction]}`
+      };
+    }
+    if (requestState === 'success' && lastResult) {
+      return {
+        tone: 'success',
+        label: 'Commande envoyée',
+        detail: `${actionLabels[lastResult.action]} · ${timeFormatter.format(lastResult.timestamp)}`
+      };
+    }
+    if (requestState === 'error' && lastResult) {
+      return {
+        tone: 'error',
+        label: 'Échec de la commande',
+        detail: lastResult.message
+      };
+    }
+    return {
+      tone: 'idle',
+      label: 'Prêt',
+      detail: `Appui court · ${actionDurations.SHORT_PRESS}`
+    };
+  }, [requestState, pendingAction, lastResult]);
+
   return (
-    <main className="app-shell">
-      <section className="control-panel" aria-labelledby="page-title">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">Bureau</p>
-            <h1 id="page-title">PC Power Controller</h1>
-          </div>
-          <div className={`status-pill ${statusTone}`}>
-            {requestState === 'pending' && <LoaderCircle className="spin" aria-hidden="true" />}
-            {requestState === 'success' && <CheckCircle2 aria-hidden="true" />}
-            {requestState === 'error' && <CircleAlert aria-hidden="true" />}
-            {requestState === 'idle' && <Wifi aria-hidden="true" />}
-            <span>
-              {requestState === 'pending'
-                ? 'Transmission'
-                : requestState === 'success'
-                  ? 'Envoyé'
-                  : requestState === 'error'
-                    ? 'Erreur'
-                    : 'Prêt'}
-            </span>
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            <Power />
+          </span>
+          <div className="brand-text">
+            <h1>PC Power Controller</h1>
+            <span>Bureau</span>
           </div>
         </div>
-
-        <div className="command-grid" aria-label="Commandes alimentation">
+        <div className="topbar-actions">
+          <span
+            className={`link-status ${streamConnected ? 'online' : 'offline'}`}
+            role="status"
+            aria-label={streamConnected ? 'Flux temps réel connecté' : 'Flux temps réel hors ligne'}
+            title={streamConnected ? 'Flux temps réel connecté' : 'Flux temps réel hors ligne'}
+          >
+            <span className="link-dot" aria-hidden="true" />
+            <span className="link-label">{streamConnected ? 'Temps réel' : 'Hors ligne'}</span>
+          </span>
           <button
-            className="command-button primary"
             type="button"
+            className="theme-button"
+            onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+            aria-label={theme === 'dark' ? 'Passer au thème clair' : 'Passer au thème sombre'}
+            title={theme === 'dark' ? 'Thème clair' : 'Thème sombre'}
+          >
+            {theme === 'dark' ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
+          </button>
+        </div>
+      </header>
+
+      <main className="content">
+        <section className="hero" aria-label="Commandes d'alimentation">
+          <button
+            type="button"
+            className="power-button"
             disabled={isBusy}
             onClick={() => void runCommand('SHORT_PRESS')}
+            aria-label={`Allumer — appui court (${actionDurations.SHORT_PRESS})`}
           >
-            <Power aria-hidden="true" />
-            <span>
-              <strong>Allumer</strong>
-              <small>{actionDescriptions.SHORT_PRESS}</small>
-            </span>
+            {pendingAction === 'SHORT_PRESS' ? (
+              <LoaderCircle className="spin" aria-hidden="true" />
+            ) : (
+              <Power aria-hidden="true" />
+            )}
           </button>
 
+          <div className="status" role="status" aria-live="polite">
+            <p className={`status-label ${status.tone}`}>{status.label}</p>
+            <p className="status-detail">{status.detail}</p>
+          </div>
+
           <button
-            className="command-button danger"
             type="button"
+            className="force-button"
             disabled={isBusy}
             onClick={() => setConfirmLongPress(true)}
           >
-            <ShieldAlert aria-hidden="true" />
-            <span>
-              <strong>Forcer l'arrêt</strong>
-              <small>{actionDescriptions.LONG_PRESS}</small>
-            </span>
+            Forcer l'arrêt
+            <span className="force-tag">{actionDurations.LONG_PRESS}</span>
           </button>
-        </div>
+        </section>
 
-        <div className="summary-grid">
-          <article className="metric">
-            <ServerCog aria-hidden="true" />
-            <span>Topic commande</span>
-            <strong>bureau/pc/power/set</strong>
-          </article>
-          <article className="metric">
-            <Activity aria-hidden="true" />
-            <span>Dernière action</span>
-            <strong>{lastResult ? actionLabels[lastResult.action] : 'Aucune'}</strong>
-          </article>
-          <article className="metric">
-            <Clock3 aria-hidden="true" />
-            <span>Horodatage</span>
-            <strong>{lastResult ? timeFormatter.format(lastResult.timestamp) : '--:--:--'}</strong>
-          </article>
-        </div>
-
-        {lastResult && (
-          <div className={`result-line ${lastResult.status}`} role="status">
-            {lastResult.status === 'success' ? (
-              <CheckCircle2 aria-hidden="true" />
+        <div className="panels">
+          <section className="panel" aria-labelledby="logs-title">
+            <header className="panel-heading">
+              <h2 id="logs-title">Journal local</h2>
+              {logs.length > 0 && (
+                <span>
+                  {logs.length} entrée{logs.length > 1 ? 's' : ''}
+                </span>
+              )}
+            </header>
+            {logs.length === 0 ? (
+              <p className="empty">Aucune commande envoyée</p>
             ) : (
-              <CircleAlert aria-hidden="true" />
+              <ol className="rows">
+                {logs.map((entry) => (
+                  <li key={entry.id}>
+                    <span className={`row-dot ${entry.status}`} aria-hidden="true" />
+                    <div className="row-body">
+                      <div className="row-line">
+                        <strong>{actionLabels[entry.action]}</strong>
+                        <time>{timeFormatter.format(entry.timestamp)}</time>
+                      </div>
+                      <small title={entry.message}>{entry.message}</small>
+                    </div>
+                  </li>
+                ))}
+              </ol>
             )}
-            <span>{lastResult.message}</span>
-          </div>
-        )}
-      </section>
+          </section>
 
-      <section className="activity-panel" aria-labelledby="activity-title">
-        <div className="activity-heading">
-          <h2 id="activity-title">Journal local</h2>
-          <span>{logs.length} entrée{logs.length > 1 ? 's' : ''}</span>
+          <section className="panel" aria-labelledby="device-title">
+            <header className="panel-heading">
+              <h2 id="device-title">Retours du PC</h2>
+              {deviceEvents.length > 0 && (
+                <span>
+                  {deviceEvents.length} événement{deviceEvents.length > 1 ? 's' : ''}
+                </span>
+              )}
+            </header>
+            {deviceEvents.length === 0 ? (
+              <p className="empty">En attente du contrôleur</p>
+            ) : (
+              <ol className="rows">
+                {deviceEvents.map((event) => (
+                  <li key={event.id}>
+                    <span className={`row-dot ${event.isError ? 'error' : 'success'}`} aria-hidden="true" />
+                    <div className="row-body">
+                      <div className="row-line">
+                        <strong>{event.label}</strong>
+                        <time>{timeFormatter.format(event.timestamp)}</time>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
         </div>
+      </main>
 
-        {logs.length === 0 ? (
-          <div className="empty-state">
-            <Activity aria-hidden="true" />
-            <span>Aucune commande envoyée</span>
-          </div>
-        ) : (
-          <ol className="log-list">
-            {logs.map((entry) => (
-              <li key={entry.id} className={entry.status}>
-                <span className="log-icon">
-                  {entry.status === 'success' ? (
-                    <CheckCircle2 aria-hidden="true" />
-                  ) : (
-                    <CircleAlert aria-hidden="true" />
-                  )}
-                </span>
-                <span className="log-body">
-                  <strong>{actionLabels[entry.action]}</strong>
-                  <small>{entry.message}</small>
-                </span>
-                <time>{timeFormatter.format(entry.timestamp)}</time>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
-
-      <section className="activity-panel" aria-labelledby="device-title">
-        <div className="activity-heading">
-          <h2 id="device-title">Retours du PC</h2>
-          <span className={`stream-pill ${streamConnected ? 'success' : 'error'}`}>
-            {streamConnected ? 'Flux connecté' : 'Flux hors ligne'}
-          </span>
-        </div>
-
-        {deviceEvents.length === 0 ? (
-          <div className="empty-state">
-            <Activity aria-hidden="true" />
-            <span>En attente de retour du contrôleur</span>
-          </div>
-        ) : (
-          <ol className="log-list">
-            {deviceEvents.map((event) => (
-              <li key={event.id} className={event.isError ? 'error' : undefined}>
-                <span className="log-icon">
-                  {event.isError ? (
-                    <CircleAlert aria-hidden="true" />
-                  ) : (
-                    <ServerCog aria-hidden="true" />
-                  )}
-                </span>
-                <span className="log-body">
-                  <strong>ESP8266</strong>
-                  <small>{event.label}</small>
-                </span>
-                <time>{timeFormatter.format(event.timestamp)}</time>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+      <footer className="meta">
+        <span>MQTT</span>
+        <code>bureau/pc/power/set</code>
+      </footer>
 
       {confirmLongPress && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setConfirmLongPress(false)}>
+        <div className="backdrop" role="presentation" onMouseDown={() => setConfirmLongPress(false)}>
           <div
-            className="confirm-dialog"
+            className="dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="confirm-title"
+            aria-describedby="confirm-body"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <ShieldAlert aria-hidden="true" />
-            <h2 id="confirm-title">Confirmer l'appui long</h2>
-            <p>La commande sera transmise comme une pression physique de 6 secondes.</p>
+            <span className="dialog-icon" aria-hidden="true">
+              <ShieldAlert />
+            </span>
+            <h2 id="confirm-title">Forcer l'arrêt ?</h2>
+            <p id="confirm-body">
+              Cette commande simule un appui de 6 secondes sur le bouton d'alimentation. Le système
+              sera éteint sans arrêt propre.
+            </p>
             <div className="dialog-actions">
-              <button type="button" className="ghost-button" onClick={() => setConfirmLongPress(false)}>
+              <button
+                ref={cancelButtonRef}
+                type="button"
+                className="button-ghost"
+                onClick={() => setConfirmLongPress(false)}
+              >
                 Annuler
               </button>
               <button
                 type="button"
-                className="confirm-button"
+                className="button-danger"
                 disabled={isBusy}
                 onClick={() => void runCommand('LONG_PRESS')}
               >
-                {pendingAction === 'LONG_PRESS' ? <LoaderCircle className="spin" aria-hidden="true" /> : null}
-                Confirmer
+                {pendingAction === 'LONG_PRESS' ? (
+                  <LoaderCircle className="spin" aria-hidden="true" />
+                ) : null}
+                Forcer l'arrêt
               </button>
             </div>
           </div>
         </div>
       )}
-    </main>
+    </div>
   );
 }
