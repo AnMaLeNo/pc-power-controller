@@ -11,6 +11,10 @@ const uint16_t mqtt_port = 1883;
 // Topiques MQTT
 const char* topic_command = "bureau/pc/power/set";
 const char* topic_state   = "bureau/pc/power/log";
+// Présence : "online" publié à la connexion, "offline" déposé par le broker
+// via le Last Will si la liaison meurt (~1,5x le keepalive). Retenu, pour que
+// tout abonné connaisse l'état courant dès sa souscription.
+const char* topic_status  = "bureau/pc/power/status";
 
 // Hardware
 const int pinOpto = D1;
@@ -177,9 +181,12 @@ void processNetworkFSM() {
                 clientId.replace(":", "");
                 Serial.printf("Tentative MQTT %s:%u\n", mqtt_server, mqtt_port);
                 
-                // Appel synchrone encapsulé - Blocage borné par le timeout LwIP/PubSubClient
-                if (mqttClient.connect(clientId.c_str())) {
+                // Appel synchrone encapsulé - Blocage borné par le timeout LwIP/PubSubClient.
+                // Le Last Will (QoS 1, retenu) est déposé auprès du broker à la connexion.
+                if (mqttClient.connect(clientId.c_str(), topic_status, 1, true, "offline")) {
                     Serial.println("Connecté au serveur MQTT !");
+                    // Message de naissance : annule l'éventuel "offline" retenu.
+                    mqttClient.publish(topic_status, "online", true);
                     mqttClient.subscribe(topic_command);
                     netState = NET_CONNECTED;
                 } else {
