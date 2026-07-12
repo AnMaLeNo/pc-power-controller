@@ -1,22 +1,4 @@
 services:
-  mosquitto:
-    image: eclipse-mosquitto:2.1-alpine
-    container_name: mqtt_broker
-    restart: always
-    ports:
-      - "1883:1883"
-    volumes:
-      - ./mosquitto/config:/mosquitto/config
-    networks:
-      - iot_net
-    healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -W 3 -i healthcheck || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-      start_interval: 1s
-
   api:
     build:
       context: ./power-pc-api
@@ -24,13 +6,16 @@ services:
     container_name: power_api
     restart: always
     environment:
-      - MQTT_HOST=mosquitto
-      - MQTT_PORT=1883
+      # Le broker MQTT est une infrastructure partagée du Raspberry (repo
+      # ~/mosquitto), hors de ce compose. host.docker.internal pointe vers
+      # l'hôte (cf. extra_hosts), où Mosquitto publie le port 1883.
+      # Surchargeable via un fichier .env (MQTT_HOST=..., MQTT_PORT=...).
+      - MQTT_HOST=${MQTT_HOST:-host.docker.internal}
+      - MQTT_PORT=${MQTT_PORT:-1883}
       - PORT=3000
       - NODE_ENV=production
-    depends_on:
-      mosquitto:
-        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - iot_net
     healthcheck:
