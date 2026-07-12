@@ -20,7 +20,7 @@ Ce projet permet d'allumer, d'éteindre ou de forcer l'arrêt d'un ordinateur à
 - **Communication Temps Réel :** Utilisation d'un broker MQTT (Eclipse Mosquitto) pour transmettre les commandes de l'API vers le microcontrôleur presque instantanément.
 - **API REST Robuste :** Développée avec Fastify pour des performances optimales, incluant la validation des schémas de requêtes.
 - **Interface Web Typée :** Application React + TypeScript construite avec Vite, proposant un pupitre de commande adapté au contrôle physique du PC.
-- **Déploiement Facilité :** Conteneurisation complète de la stack (Frontend + API + Broker MQTT) via Docker Compose.
+- **Déploiement Facilité :** Conteneurisation de la stack (Frontend + API) via Docker Compose. Le broker MQTT est une infrastructure partagée du Raspberry, hébergée dans son propre dépôt.
 
 ## Architecture du Système
 
@@ -28,7 +28,7 @@ Le projet est divisé en quatre composants majeurs :
 1. **Frontend Web (React / TypeScript / Vite) :** Fournit une interface de commande responsive, servie par Nginx en production et reliée à l'API via un proxy `/api`.
 
 2. **Backend API (Node.js / Fastify) :** Reçoit les requêtes HTTP (ex: `SHORT_PRESS` ou `LONG_PRESS`) et les publie sur le topic MQTT `bureau/pc/power/set`.
-3. **Broker MQTT (Eclipse Mosquitto) :** Agit comme un intermédiaire léger pour distribuer les messages entre l'API et le hardware.
+3. **Broker MQTT (Eclipse Mosquitto) :** Agit comme un intermédiaire léger pour distribuer les messages entre l'API et le hardware. C'est une infrastructure **partagée** entre tous les projets IoT du Raspberry (un seul broker par machine) : il vit dans le dépôt `~/mosquitto`, et ce projet s'y connecte en simple client via `host.docker.internal:1883` (surchargeable par `.env` : `MQTT_HOST`, `MQTT_PORT`).
 4. **Firmware ESP8266 (C++ / Arduino) :** Connecté au réseau WiFi local, il s'abonne au topic MQTT. À la réception d'un message, il déclenche une impulsion (High/Low) d'une durée spécifique (300ms pour un appui court, 6000ms pour un appui long) sur la broche `D1` reliée à l'optocoupleur.
 
 ## Installation & Lancement
@@ -38,7 +38,15 @@ Le code source se trouve dans le dossier `esp8266/`. Le projet est configuré av
 - Copiez `config.ini.exemple` vers `config.ini` et ajoutez vos identifiants WiFi ainsi que l'IP de votre serveur MQTT.
 - Compilez et téléversez le code C++ sur votre Wemos D1 Mini / ESP8266.
 
-### 2. Lancement de la stack Docker
+### 2. Prérequis : le broker MQTT partagé
+Le broker Mosquitto n'est plus embarqué dans ce projet : c'est une infrastructure commune au Raspberry, gérée dans le dépôt `~/mosquitto`. Démarrez-le d'abord s'il ne tourne pas déjà :
+
+```bash
+cd ~/mosquitto
+docker compose up -d
+```
+
+### 3. Lancement de la stack Docker
 Assurez-vous d'avoir [Docker](https://www.docker.com/) et Docker Compose installés sur votre machine ou votre serveur cible (ex: Raspberry Pi).
 
 ```bash
