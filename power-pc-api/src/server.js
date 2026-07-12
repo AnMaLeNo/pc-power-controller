@@ -9,9 +9,23 @@ const mqttClient = mqtt.connect(`mqtt://${MQTT_HOST}:${MQTT_PORT}`);
 
 const TOPIC_COMMAND = 'bureau/pc/power/set';
 const TOPIC_LOG = 'bureau/pc/power/log';
+const TOPIC_STATUS = 'bureau/pc/power/status';
 
 // Clients SSE connectés (réponses HTTP gardées ouvertes pour le push temps réel)
 const sseClients = new Set();
+
+// Dernier état de présence du contrôleur ("online" à la naissance, "offline"
+// via Last Will ; messages retenus par le broker). Resservi à chaque client
+// SSE qui se connecte pour qu'il démarre synchronisé.
+let lastStatus = null;
+
+// Diffuse un événement à tous les clients SSE connectés.
+const broadcast = (event) => {
+  const data = JSON.stringify(event);
+  for (const client of sseClients) {
+    client.raw.write(`data: ${data}\n\n`);
+  }
+};
 
 // Heartbeat SSE : un commentaire (`:`) ignoré par EventSource mais qui génère
 // du trafic. Garde la connexion vivante à travers les proxies et fait échouer
@@ -24,9 +38,9 @@ heartbeat.unref();
 
 mqttClient.on('connect', () => {
   fastify.log.info('Connecté au Broker MQTT');
-  mqttClient.subscribe(TOPIC_LOG, (err) => {
-    if (err) fastify.log.error({ err }, `Échec subscribe ${TOPIC_LOG}`);
-    else fastify.log.info(`Abonné au topic ${TOPIC_LOG}`);
+  mqttClient.subscribe([TOPIC_LOG, TOPIC_STATUS], (err) => {
+    if (err) fastify.log.error({ err }, `Échec subscribe ${TOPIC_LOG} / ${TOPIC_STATUS}`);
+    else fastify.log.info(`Abonné aux topics ${TOPIC_LOG} et ${TOPIC_STATUS}`);
   });
 });
 
@@ -39,6 +53,18 @@ mqttClient.on('error', (err) => {
 // décode et expose un objet typé au front. Fallback: si le payload n'est pas du
 // JSON (ancien firmware), on le relaie en texte brut pour ne pas perdre l'info.
 mqttClient.on('message', (topic, payload) => {
+  // Présence du contrôleur : relayée telle quelle au front sous forme d'un
+  // événement status typé.
+  if (topic === TOPIC_STATUS) {
+    lastStatus = {
+      event: 'status',
+      online: payload.toString() === 'online',
+      timestamp: new Date().toISOString()
+    };
+    broadcast(lastStatus);
+    return;
+  }
+
   if (topic !== TOPIC_LOG) return;
   const raw = payload.toString();
 
@@ -55,10 +81,7 @@ mqttClient.on('message', (topic, payload) => {
     event = { event: 'raw', message: raw, timestamp: new Date().toISOString() };
   }
 
-  const data = JSON.stringify(event);
-  for (const client of sseClients) {
-    client.raw.write(`data: ${data}\n\n`);
-  }
+  broadcast(event);
 });
 
 const powerSchema = {
@@ -141,6 +164,11 @@ fastify.get('/api/events', (request, reply) => {
     'X-Accel-Buffering': 'no'
   });
   reply.raw.write('retry: 3000\n\n');
+
+  // Synchronisation immédiate du nouveau client avec la présence du contrôleur.
+  if (lastStatus) {
+    reply.raw.write(`data: ${JSON.stringify(lastStatus)}\n\n`);
+  }
 
   sseClients.add(reply);
   fastify.log.info(`Client SSE connecté (${sseClients.size} actif(s))`);
