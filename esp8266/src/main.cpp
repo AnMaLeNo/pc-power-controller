@@ -19,14 +19,20 @@ const int pinLed = LED_BUILTIN;
 WiFiClient wifiNetworkClient;
 PubSubClient mqttClient(wifiNetworkClient);
 
-// Paramètres temporels de l'impulsion matérielle
-bool pulseActive = false;
+// Impulsion matérielle : la fin est déléguée au timer1 (ISR one-shot), donc la
+// durée reste bornée même si la boucle principale est bloquée (ex. connect()
+// MQTT pendant une panne réseau). Contrainte : timer1 doit rester libre, donc
+// pas d'analogWrite/tone/Servo dans ce firmware.
+volatile bool pulseActive = false;
 const uint32_t SHORT_PRESS_DURATION = 300;
 const uint32_t LONG_PRESS_DURATION = 6000;
-uint32_t pulseStartTime = 0;
-uint32_t pulseDuration = 0;
-// Action en cours, conservée pour corréler l'ACK pulse_end à la commande.
-char pulseAction[16] = "";
+// Action en cours, corrélée à l'ACK pulse_end. Littéraux uniquement : l'ISR
+// recopie le pointeur, jamais le contenu.
+const char* pulseAction = "";
+// Fin d'impulsion signalée par l'ISR ; l'ACK MQTT est publié depuis la boucle
+// principale (interdiction de publier depuis une ISR).
+const char* volatile endedAction = "";
+volatile bool pulseEndPending = false;
 
 // Définition des états de l'automate réseau (FSM)
 enum NetworkState {
@@ -52,7 +58,7 @@ const uint16_t MESSAGE_MAX_LENGTH = 20;
 
 // Déclaration préalable des fonctions
 void startPulse(uint32_t duration, const char* action);
-void handlePulse();
+void handlePulseAck();
 void processNetworkFSM();
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -79,39 +85,54 @@ void callback(char* topic, byte* payload, unsigned int length) {
     }
 }
 
+// Fin d'impulsion en contexte d'interruption : s'exécute à l'échéance exacte,
+// y compris pendant un appel réseau bloquant de la boucle principale.
+IRAM_ATTR void onPulseEnd() {
+    digitalWrite(pinOpto, LOW);
+    digitalWrite(pinLed, HIGH);
+    endedAction = pulseAction;
+    pulseEndPending = true;
+    pulseActive = false;
+}
+
 void startPulse(uint32_t duration, const char* action) {
     if (pulseActive) {
         mqttClient.publish(topic_state, "{\"event\":\"error\",\"reason\":\"pulse_already_active\"}");
         Serial.print("Pulse already active\n");
         return;
     }
-    pulseDuration = duration;
-    snprintf(pulseAction, sizeof(pulseAction), "%s", action);
+    pulseAction = action;
+    pulseActive = true;
+
     digitalWrite(pinOpto, HIGH);
     digitalWrite(pinLed, LOW);
 
+    // One-shot timer1 en TIM_DIV256 : 80 MHz / 256 = 312,5 ticks/ms, d'où
+    // ticks = ms * 625 / 2 (durées paires ici, division exacte). Max 23 bits
+    // = ~26,8 s, largement au-dessus du LONG_PRESS.
+    timer1_enable(TIM_DIV256, TIM_EDGE, TIM_SINGLE);
+    timer1_write((duration * 625UL) / 2);
+
+    // Publié après l'armement : un blocage réseau ne peut plus retarder la
+    // libération de la broche, elle appartient désormais au timer.
     snprintf(buffer, sizeof(buffer),
              "{\"event\":\"pulse_start\",\"action\":\"%s\",\"ts\":%lu}", action, millis());
     mqttClient.publish(topic_state, buffer);
-
-    pulseStartTime = millis();
-    pulseActive = true;
     Serial.print("Start pulse\n");
 }
 
-void handlePulse() {
-    if (pulseActive && (millis() - pulseStartTime >= pulseDuration)) {
-        digitalWrite(pinOpto, LOW);
-        digitalWrite(pinLed, HIGH);
-        pulseActive = false;
+// Publie l'ACK de la fin d'impulsion signalée par l'ISR. Le ts est celui de la
+// publication ; la broche, elle, a été libérée pile à l'échéance par le timer.
+void handlePulseAck() {
+    if (!pulseEndPending) return;
+    pulseEndPending = false;
 
-        if (mqttClient.connected()) {
-            snprintf(buffer, sizeof(buffer),
-                     "{\"event\":\"pulse_end\",\"action\":\"%s\",\"ts\":%lu}", pulseAction, millis());
-            mqttClient.publish(topic_state, buffer);
-        }
-        Serial.print("End pulse\n");
+    if (mqttClient.connected()) {
+        snprintf(buffer, sizeof(buffer),
+                 "{\"event\":\"pulse_end\",\"action\":\"%s\",\"ts\":%lu}", endedAction, millis());
+        mqttClient.publish(topic_state, buffer);
     }
+    Serial.print("End pulse\n");
 }
 
 void processNetworkFSM() {
@@ -197,12 +218,16 @@ void setup() {
     digitalWrite(pinOpto, LOW);
     digitalWrite(pinLed, HIGH);
 
+    // Timer matériel dédié à la fin d'impulsion (one-shot armé par startPulse)
+    timer1_isr_init();
+    timer1_attachInterrupt(onPulseEnd);
+
     mqttClient.setServer(mqtt_server, mqtt_port);
     mqttClient.setCallback(callback);
 }
 
 void loop() {
     // Ordonnancement coopératif à complexité amortie O(1)
-    handlePulse();         // Évaluation inconditionnelle du registre matériel
+    handlePulseAck();      // Publication différée des ACK de fin d'impulsion
     processNetworkFSM();   // Traitement asynchrone non-bloquant du vecteur réseau
 }
