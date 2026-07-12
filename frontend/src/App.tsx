@@ -53,11 +53,13 @@ const actionDurations: Record<PowerAction, string> = {
 };
 
 // Événement structuré reçu de l'ESP (relayé tel quel par l'API via SSE).
+// `status` est produit par l'API depuis le topic de présence (naissance/LWT).
 type EspEvent = {
-  event: 'pulse_start' | 'pulse_end' | 'error' | 'raw';
+  event: 'pulse_start' | 'pulse_end' | 'error' | 'raw' | 'status';
   action?: PowerAction;
   reason?: string;
   message?: string;
+  online?: boolean;
   timestamp: string;
 };
 
@@ -118,6 +120,9 @@ export default function App() {
   const [confirmLongPress, setConfirmLongPress] = useState(false);
   const [deviceEvents, setDeviceEvents] = useState<DeviceEvent[]>([]);
   const [streamConnected, setStreamConnected] = useState(false);
+  // Présence du contrôleur (LWT MQTT relayé par l'API) ; null tant qu'aucun
+  // état retenu n'est arrivé (ESP jamais vu par le broker).
+  const [deviceOnline, setDeviceOnline] = useState<boolean | null>(null);
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -142,12 +147,22 @@ export default function App() {
     source.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data) as EspEvent;
+        if (data.event === 'status') {
+          setDeviceOnline(data.online === true);
+          return;
+        }
         const { label, isError } = describeEspEvent(data);
+        // Calculé hors de la closure : le rétrécissement de type du `return`
+        // ci-dessus ne survit pas à l'intérieur du callback de setState.
+        const kind: DeviceEvent['kind'] =
+          data.event === 'pulse_start' || data.event === 'pulse_end' || data.event === 'error'
+            ? data.event
+            : 'raw';
         setDeviceEvents((current) =>
           [
             {
               id: crypto.randomUUID(),
-              kind: data.event,
+              kind,
               label,
               isError,
               timestamp: data.timestamp ? new Date(data.timestamp) : new Date()
@@ -213,6 +228,13 @@ export default function App() {
 
   const isBusy = requestState === 'pending';
 
+  const controllerStatusLabel =
+    deviceOnline === null
+      ? 'État du contrôleur inconnu'
+      : deviceOnline
+        ? 'Contrôleur en ligne'
+        : 'Contrôleur hors ligne';
+
   const status = useMemo(() => {
     if (requestState === 'pending' && pendingAction) {
       return {
@@ -255,6 +277,15 @@ export default function App() {
           </div>
         </div>
         <div className="topbar-actions">
+          <span
+            className={`link-status ${deviceOnline === null ? '' : deviceOnline ? 'online' : 'offline'}`}
+            role="status"
+            aria-label={controllerStatusLabel}
+            title={controllerStatusLabel}
+          >
+            <span className="link-dot" aria-hidden="true" />
+            <span className="link-label">Contrôleur</span>
+          </span>
           <span
             className={`link-status ${streamConnected ? 'online' : 'offline'}`}
             role="status"
