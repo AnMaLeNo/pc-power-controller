@@ -119,6 +119,7 @@ void processNetworkFSM() {
 
     switch (netState) {
         case NET_INIT:
+            WiFi.persistent(false);
             WiFi.mode(WIFI_STA);
             WiFi.setAutoConnect(false);     // Désactivation de la FSM interne d'Espressif (L2)
             WiFi.setAutoReconnect(false);   // Reprise du contrôle logiciel absolu de la couche liaison
