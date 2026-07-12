@@ -84,6 +84,16 @@ function describeEspEvent(data: EspEvent): { label: string; isError: boolean } {
   }
 }
 
+// Identifiants des entrées de journaux (clés React). crypto.randomUUID()
+// n'est disponible qu'en contexte sécurisé (HTTPS ou localhost) : servie en
+// HTTP sur le LAN, la fonction n'existe pas et ferait planter l'application.
+// Un compteur horodaté suffit ici (unicité par session seulement).
+let eventIdCounter = 0;
+function nextEventId(): string {
+  eventIdCounter += 1;
+  return `${Date.now().toString(36)}-${eventIdCounter}`;
+}
+
 const timeFormatter = new Intl.DateTimeFormat('fr-FR', {
   hour: '2-digit',
   minute: '2-digit',
@@ -161,7 +171,7 @@ export default function App() {
         setDeviceEvents((current) =>
           [
             {
-              id: crypto.randomUUID(),
+              id: nextEventId(),
               kind,
               label,
               isError,
@@ -198,7 +208,7 @@ export default function App() {
     try {
       const result = await sendPowerCommand(action);
       const entry: CommandLog = {
-        id: crypto.randomUUID(),
+        id: nextEventId(),
         action,
         status: 'success',
         message: result.message,
@@ -210,7 +220,7 @@ export default function App() {
       setRequestState('success');
     } catch (error) {
       const entry: CommandLog = {
-        id: crypto.randomUUID(),
+        id: nextEventId(),
         action,
         status: 'error',
         message: error instanceof Error ? error.message : 'Commande non transmise',
