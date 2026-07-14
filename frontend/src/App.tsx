@@ -1,45 +1,33 @@
-import { LoaderCircle, Moon, Power, ShieldAlert, Sun } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AppShell,
+  ConfirmationModal,
+  EventLog,
+  Hero,
+  LoadingSpinner,
+  MetaFooter,
+  Panel,
+  PanelGrid,
+  StatusPill,
+  StatusReadout,
+  ThemeToggle,
+  TopBar,
+  postCommand,
+  timeFormatter,
+  useCommand,
+  useDeviceStream,
+  useTheme
+} from 'aruids';
+import type { EventLogEntry, StatusTone } from 'aruids';
+import { Power, ShieldAlert } from 'lucide-react';
+import { useMemo, useState } from 'react';
 
 type PowerAction = 'SHORT_PRESS' | 'LONG_PRESS';
-type RequestState = 'idle' | 'pending' | 'success' | 'error';
-type Theme = 'dark' | 'light';
-
-const THEME_STORAGE_KEY = 'pc-power-theme';
-const themeColors: Record<Theme, string> = {
-  dark: '#0a0a0c',
-  light: '#f7f7f8'
-};
-
-// Le script inline d'index.html applique le thème avant le premier rendu
-// (anti-flash) ; on relit l'attribut pour démarrer React synchronisé.
-function getInitialTheme(): Theme {
-  const applied = document.documentElement.dataset.theme;
-  if (applied === 'light' || applied === 'dark') return applied;
-  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-}
 
 type ApiSuccess = {
   status: string;
   message: string;
   topic: string;
   timestamp: string;
-};
-
-type CommandLog = {
-  id: string;
-  action: PowerAction;
-  status: Exclude<RequestState, 'idle' | 'pending'>;
-  message: string;
-  timestamp: Date;
-};
-
-type DeviceEvent = {
-  id: string;
-  kind: 'pulse_start' | 'pulse_end' | 'error' | 'raw';
-  label: string;
-  isError: boolean;
-  timestamp: Date;
 };
 
 const actionLabels: Record<PowerAction, string> = {
@@ -53,7 +41,6 @@ const actionDurations: Record<PowerAction, string> = {
 };
 
 // Événement structuré reçu de l'ESP (relayé tel quel par l'API via SSE).
-// `status` est produit par l'API depuis le topic de présence (naissance/LWT).
 type EspEvent = {
   event: 'pulse_start' | 'pulse_end' | 'error' | 'raw' | 'status';
   action?: PowerAction;
@@ -69,7 +56,7 @@ const errorReasons: Record<string, string> = {
   payload_too_large: 'Message trop volumineux'
 };
 
-// Transforme l'événement ESP en libellé lisible pour l'UI.
+// Transforme l'événement ESP en libellé lisible pour le journal.
 function describeEspEvent(data: EspEvent): { label: string; isError: boolean } {
   const actionLabel = data.action ? actionLabels[data.action] : null;
   switch (data.event) {
@@ -84,187 +71,54 @@ function describeEspEvent(data: EspEvent): { label: string; isError: boolean } {
   }
 }
 
-// Identifiants des entrées de journaux (clés React). crypto.randomUUID()
-// n'est disponible qu'en contexte sécurisé (HTTPS ou localhost) : servie en
-// HTTP sur le LAN, la fonction n'existe pas et ferait planter l'application.
-// Un compteur horodaté suffit ici (unicité par session seulement).
-let eventIdCounter = 0;
-function nextEventId(): string {
-  eventIdCounter += 1;
-  return `${Date.now().toString(36)}-${eventIdCounter}`;
-}
-
-const timeFormatter = new Intl.DateTimeFormat('fr-FR', {
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit'
-});
-
-async function sendPowerCommand(action: PowerAction): Promise<ApiSuccess> {
-  const response = await fetch('/api/power', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ action })
-  });
-
-  const payload = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    const errorMessage =
-      payload && typeof payload.error === 'string'
-        ? payload.error
-        : `Erreur HTTP ${response.status}`;
-    throw new Error(errorMessage);
-  }
-
-  return payload as ApiSuccess;
-}
-
 export default function App() {
-  const [requestState, setRequestState] = useState<RequestState>('idle');
-  const [pendingAction, setPendingAction] = useState<PowerAction | null>(null);
-  const [lastResult, setLastResult] = useState<CommandLog | null>(null);
-  const [logs, setLogs] = useState<CommandLog[]>([]);
+  const { theme, toggleTheme } = useTheme('pc-power-theme');
   const [confirmLongPress, setConfirmLongPress] = useState(false);
-  const [deviceEvents, setDeviceEvents] = useState<DeviceEvent[]>([]);
-  const [streamConnected, setStreamConnected] = useState(false);
-  // Présence du contrôleur (LWT MQTT relayé par l'API) ; null tant qu'aucun
-  // état retenu n'est arrivé (ESP jamais vu par le broker).
-  const [deviceOnline, setDeviceOnline] = useState<boolean | null>(null);
-  const [theme, setTheme] = useState<Theme>(getInitialTheme);
-  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    document
-      .querySelector('meta[name="theme-color"]')
-      ?.setAttribute('content', themeColors[theme]);
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, theme);
-    } catch {
-      // stockage indisponible (navigation privée) : le choix vaut pour la session
-    }
-  }, [theme]);
+  const command = useCommand((action: PowerAction) =>
+    postCommand<ApiSuccess>('/api/power', { action })
+  );
 
   // Flux SSE : retours réels de l'ESP relayés par l'API (topic bureau/pc/power/log)
-  useEffect(() => {
-    const source = new EventSource('/api/events');
-
-    source.onopen = () => setStreamConnected(true);
-
-    source.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as EspEvent;
-        if (data.event === 'status') {
-          setDeviceOnline(data.online === true);
-          return;
-        }
-        const { label, isError } = describeEspEvent(data);
-        // Calculé hors de la closure : le rétrécissement de type du `return`
-        // ci-dessus ne survit pas à l'intérieur du callback de setState.
-        const kind: DeviceEvent['kind'] =
-          data.event === 'pulse_start' || data.event === 'pulse_end' || data.event === 'error'
-            ? data.event
-            : 'raw';
-        setDeviceEvents((current) =>
-          [
-            {
-              id: nextEventId(),
-              kind,
-              label,
-              isError,
-              timestamp: data.timestamp ? new Date(data.timestamp) : new Date()
-            },
-            ...current
-          ].slice(0, 12)
-        );
-      } catch {
-        // payload non-JSON ignoré
-      }
-    };
-
-    source.onerror = () => setStreamConnected(false);
-
-    return () => source.close();
-  }, []);
-
-  // Modale : focus initial sur « Annuler » et fermeture via Échap.
-  useEffect(() => {
-    if (!confirmLongPress) return;
-    cancelButtonRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setConfirmLongPress(false);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [confirmLongPress]);
+  const stream = useDeviceStream<EspEvent>({
+    url: '/api/events',
+    describeEvent: describeEspEvent
+  });
 
   const runCommand = async (action: PowerAction) => {
-    setRequestState('pending');
-    setPendingAction(action);
-
-    try {
-      const result = await sendPowerCommand(action);
-      const entry: CommandLog = {
-        id: nextEventId(),
-        action,
-        status: 'success',
-        message: result.message,
-        timestamp: new Date(result.timestamp)
-      };
-
-      setLastResult(entry);
-      setLogs((currentLogs) => [entry, ...currentLogs].slice(0, 8));
-      setRequestState('success');
-    } catch (error) {
-      const entry: CommandLog = {
-        id: nextEventId(),
-        action,
-        status: 'error',
-        message: error instanceof Error ? error.message : 'Commande non transmise',
-        timestamp: new Date()
-      };
-
-      setLastResult(entry);
-      setLogs((currentLogs) => [entry, ...currentLogs].slice(0, 8));
-      setRequestState('error');
-    } finally {
-      setPendingAction(null);
-      setConfirmLongPress(false);
-    }
+    await command.run(action);
+    setConfirmLongPress(false);
   };
 
-  const isBusy = requestState === 'pending';
+  const isBusy = command.isBusy;
 
   const controllerStatusLabel =
-    deviceOnline === null
+    stream.isDeviceOnline === null
       ? 'État du contrôleur inconnu'
-      : deviceOnline
+      : stream.isDeviceOnline
         ? 'Contrôleur en ligne'
         : 'Contrôleur hors ligne';
 
-  const status = useMemo(() => {
-    if (requestState === 'pending' && pendingAction) {
+  const status = useMemo((): { tone: StatusTone; label: string; detail: string } => {
+    if (command.requestState === 'pending' && command.pendingInput) {
       return {
         tone: 'pending',
         label: 'Transmission…',
-        detail: `${actionLabels[pendingAction]} · ${actionDurations[pendingAction]}`
+        detail: `${actionLabels[command.pendingInput]} · ${actionDurations[command.pendingInput]}`
       };
     }
-    if (requestState === 'success' && lastResult) {
+    if (command.requestState === 'success' && command.lastResult) {
       return {
         tone: 'success',
         label: 'Commande envoyée',
-        detail: `${actionLabels[lastResult.action]} · ${timeFormatter.format(lastResult.timestamp)}`
+        detail: `${actionLabels[command.lastResult.input]} · ${timeFormatter.format(command.lastResult.timestamp)}`
       };
     }
-    if (requestState === 'error' && lastResult) {
+    if (command.requestState === 'error' && command.lastResult) {
       return {
         tone: 'error',
         label: 'Échec de la commande',
-        detail: lastResult.message
+        detail: command.lastResult.message
       };
     }
     return {
@@ -272,53 +126,51 @@ export default function App() {
       label: 'Prêt',
       detail: `Appui court · ${actionDurations.SHORT_PRESS}`
     };
-  }, [requestState, pendingAction, lastResult]);
+  }, [command.requestState, command.pendingInput, command.lastResult]);
+
+  const commandEntries = useMemo(
+    (): EventLogEntry[] =>
+      command.logs.map((entry) => ({
+        id: entry.id,
+        label: actionLabels[entry.input],
+        detail: entry.message,
+        tone: entry.status,
+        timestamp: entry.timestamp
+      })),
+    [command.logs]
+  );
+
+  const deviceEntries = useMemo(
+    (): EventLogEntry[] =>
+      stream.events.map((event) => ({
+        id: event.id,
+        label: event.label,
+        tone: event.isError ? 'error' : 'success',
+        timestamp: event.timestamp
+      })),
+    [stream.events]
+  );
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            <Power />
-          </span>
-          <div className="brand-text">
-            <h1>PC Power Controller</h1>
-            <span>Bureau</span>
-          </div>
-        </div>
-        <div className="topbar-actions">
-          <span
-            className={`link-status ${deviceOnline === null ? '' : deviceOnline ? 'online' : 'offline'}`}
-            role="status"
-            aria-label={controllerStatusLabel}
-            title={controllerStatusLabel}
-          >
-            <span className="link-dot" aria-hidden="true" />
-            <span className="link-label">Contrôleur</span>
-          </span>
-          <span
-            className={`link-status ${streamConnected ? 'online' : 'offline'}`}
-            role="status"
-            aria-label={streamConnected ? 'Flux temps réel connecté' : 'Flux temps réel hors ligne'}
-            title={streamConnected ? 'Flux temps réel connecté' : 'Flux temps réel hors ligne'}
-          >
-            <span className="link-dot" aria-hidden="true" />
-            <span className="link-label">{streamConnected ? 'Temps réel' : 'Hors ligne'}</span>
-          </span>
-          <button
-            type="button"
-            className="theme-button"
-            onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
-            aria-label={theme === 'dark' ? 'Passer au thème clair' : 'Passer au thème sombre'}
-            title={theme === 'dark' ? 'Thème clair' : 'Thème sombre'}
-          >
-            {theme === 'dark' ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
-          </button>
-        </div>
-      </header>
+    <AppShell>
+      <TopBar icon={<Power />} title="PC Power Controller" subtitle="Bureau">
+        <StatusPill
+          state={stream.isDeviceOnline === null ? 'unknown' : stream.isDeviceOnline ? 'online' : 'offline'}
+          label="Contrôleur"
+          description={controllerStatusLabel}
+        />
+        <StatusPill
+          state={stream.isStreamConnected ? 'online' : 'offline'}
+          label={stream.isStreamConnected ? 'Temps réel' : 'Hors ligne'}
+          description={
+            stream.isStreamConnected ? 'Flux temps réel connecté' : 'Flux temps réel hors ligne'
+          }
+        />
+        <ThemeToggle theme={theme} onToggle={toggleTheme} />
+      </TopBar>
 
       <main className="content">
-        <section className="hero" aria-label="Commandes d'alimentation">
+        <Hero label="Commandes d'alimentation">
           <button
             type="button"
             className="power-button"
@@ -326,17 +178,14 @@ export default function App() {
             onClick={() => void runCommand('SHORT_PRESS')}
             aria-label={`Allumer — appui court (${actionDurations.SHORT_PRESS})`}
           >
-            {pendingAction === 'SHORT_PRESS' ? (
-              <LoaderCircle className="spin" aria-hidden="true" />
+            {command.pendingInput === 'SHORT_PRESS' ? (
+              <LoadingSpinner />
             ) : (
               <Power aria-hidden="true" />
             )}
           </button>
 
-          <div className="status" role="status" aria-live="polite">
-            <p className={`status-label ${status.tone}`}>{status.label}</p>
-            <p className="status-detail">{status.detail}</p>
-          </div>
+          <StatusReadout tone={status.tone} label={status.label} detail={status.detail} />
 
           <button
             type="button"
@@ -347,115 +196,47 @@ export default function App() {
             Forcer l'arrêt
             <span className="force-tag">{actionDurations.LONG_PRESS}</span>
           </button>
-        </section>
+        </Hero>
 
-        <div className="panels">
-          <section className="panel" aria-labelledby="logs-title">
-            <header className="panel-heading">
-              <h2 id="logs-title">Journal local</h2>
-              {logs.length > 0 && (
-                <span>
-                  {logs.length} entrée{logs.length > 1 ? 's' : ''}
-                </span>
-              )}
-            </header>
-            {logs.length === 0 ? (
-              <p className="empty">Aucune commande envoyée</p>
-            ) : (
-              <ol className="rows">
-                {logs.map((entry) => (
-                  <li key={entry.id}>
-                    <span className={`row-dot ${entry.status}`} aria-hidden="true" />
-                    <div className="row-body">
-                      <div className="row-line">
-                        <strong>{actionLabels[entry.action]}</strong>
-                        <time>{timeFormatter.format(entry.timestamp)}</time>
-                      </div>
-                      <small title={entry.message}>{entry.message}</small>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </section>
+        <PanelGrid>
+          <Panel
+            title="Journal local"
+            headerExtra={
+              command.logs.length > 0
+                ? `${command.logs.length} entrée${command.logs.length > 1 ? 's' : ''}`
+                : undefined
+            }
+          >
+            <EventLog entries={commandEntries} emptyLabel="Aucune commande envoyée" />
+          </Panel>
 
-          <section className="panel" aria-labelledby="device-title">
-            <header className="panel-heading">
-              <h2 id="device-title">Retours du PC</h2>
-              {deviceEvents.length > 0 && (
-                <span>
-                  {deviceEvents.length} événement{deviceEvents.length > 1 ? 's' : ''}
-                </span>
-              )}
-            </header>
-            {deviceEvents.length === 0 ? (
-              <p className="empty">En attente du contrôleur</p>
-            ) : (
-              <ol className="rows">
-                {deviceEvents.map((event) => (
-                  <li key={event.id}>
-                    <span className={`row-dot ${event.isError ? 'error' : 'success'}`} aria-hidden="true" />
-                    <div className="row-body">
-                      <div className="row-line">
-                        <strong>{event.label}</strong>
-                        <time>{timeFormatter.format(event.timestamp)}</time>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </section>
-        </div>
+          <Panel
+            title="Retours du PC"
+            headerExtra={
+              stream.events.length > 0
+                ? `${stream.events.length} événement${stream.events.length > 1 ? 's' : ''}`
+                : undefined
+            }
+          >
+            <EventLog entries={deviceEntries} emptyLabel="En attente du contrôleur" />
+          </Panel>
+        </PanelGrid>
       </main>
 
-      <footer className="meta">
-        <span>MQTT</span>
-        <code>bureau/pc/power/set</code>
-      </footer>
+      <MetaFooter label="MQTT" code="bureau/pc/power/set" />
 
-      {confirmLongPress && (
-        <div className="backdrop" role="presentation" onMouseDown={() => setConfirmLongPress(false)}>
-          <div
-            className="dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="confirm-title"
-            aria-describedby="confirm-body"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <span className="dialog-icon" aria-hidden="true">
-              <ShieldAlert />
-            </span>
-            <h2 id="confirm-title">Forcer l'arrêt ?</h2>
-            <p id="confirm-body">
-              Cette commande simule un appui de 6 secondes sur le bouton d'alimentation. Le système
-              sera éteint sans arrêt propre.
-            </p>
-            <div className="dialog-actions">
-              <button
-                ref={cancelButtonRef}
-                type="button"
-                className="button-ghost"
-                onClick={() => setConfirmLongPress(false)}
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                className="button-danger"
-                disabled={isBusy}
-                onClick={() => void runCommand('LONG_PRESS')}
-              >
-                {pendingAction === 'LONG_PRESS' ? (
-                  <LoaderCircle className="spin" aria-hidden="true" />
-                ) : null}
-                Forcer l'arrêt
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <ConfirmationModal
+        isOpen={confirmLongPress}
+        icon={<ShieldAlert />}
+        title="Forcer l'arrêt ?"
+        confirmLabel="Forcer l'arrêt"
+        onCancel={() => setConfirmLongPress(false)}
+        onConfirm={() => void runCommand('LONG_PRESS')}
+        isBusy={command.pendingInput === 'LONG_PRESS'}
+      >
+        Cette commande simule un appui de 6 secondes sur le bouton d'alimentation. Le système sera
+        éteint sans arrêt propre.
+      </ConfirmationModal>
+    </AppShell>
   );
 }

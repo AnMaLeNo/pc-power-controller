@@ -1,4 +1,6 @@
 FROM node:24.13-alpine3.22 AS base
+# git : requis par npm pour installer la dépendance aruids (git+https).
+RUN apk add --no-cache git
 WORKDIR /usr/src/app
 RUN chown node:node .
 COPY --chown=node:node package-lock.json package.json ./
