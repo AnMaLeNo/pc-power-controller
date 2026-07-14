@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "pc_power")(type "KiCad")(uri "${KIPRJMOD}/pc_power.kicad_sym")(options "")(descr "Symboles du projet — copies figées des bibliothèques officielles KiCad 9.0.9.1"))
+)
