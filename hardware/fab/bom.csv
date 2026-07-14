@@ -1,5 +1,6 @@
 "Reference","Valeur","Empreinte","Qte"
 "J1","PWR_SW","pc_power:SolderWirePad_1x02_P5.08mm","1"
+"J2","5V_IN","pc_power:SolderWirePad_1x02_P5.08mm","1"
 "R1","330R","pc_power:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal","1"
 "U1","WEMOS_D1_mini","pc_power:WEMOS_D1_mini_light","1"
 "U2","PC817","pc_power:DIP-4_W7.62mm","1"

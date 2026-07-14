@@ -147,7 +147,7 @@ body.append(symbol(
 for px, py, k in [
     (50.80, 78.74, "u1-1-rst"), (71.12, 76.20, "u1-2-a0"), (71.12, 78.74, "u1-3-d0"),
     (71.12, 91.44, "u1-4-d5"), (71.12, 93.98, "u1-5-d6"), (71.12, 96.52, "u1-6-d7"),
-    (71.12, 99.06, "u1-7-d8"), (63.50, 68.58, "u1-8-3v3"), (58.42, 68.58, "u1-9-5v"),
+    (71.12, 99.06, "u1-7-d8"), (63.50, 68.58, "u1-8-3v3"),
     (71.12, 88.90, "u1-11-d4"), (71.12, 86.36, "u1-12-d3"), (71.12, 83.82, "u1-13-d2"),
     (50.80, 86.36, "u1-15-rx"), (50.80, 88.90, "u1-16-tx"),
 ]:
@@ -196,6 +196,20 @@ body.append(symbol(
     "sym/J1",
 ))
 
+# --------------------------------------------- J2 pastilles alimentation 5V/GND
+# Rot 180 -> broches à droite : 1 (5V) en (48.26, 66.04), 2 (GND) en (48.26, 63.5)
+body.append(symbol(
+    "pc_power:Conn_01x02", "J2", 43.18, 66.04, 180,
+    "\n".join([
+        prop("Reference", "J2", 43.18, 62.23),
+        prop("Value", "5V_IN", 43.18, 69.85),
+        prop("Footprint", "pc_power:SolderWirePad_1x02_P5.08mm", 43.18, 66.04, hide=True),
+        prop("Datasheet", "~", 43.18, 66.04, hide=True),
+    ]),
+    ["1", "2"],
+    "sym/J2",
+))
+
 # ------------------------------------------------------------ GND et PWR_FLAG
 body.append(symbol(
     "pc_power:GND", "#PWR01", 74.93, 109.22, 0,
@@ -207,6 +221,17 @@ body.append(symbol(
     ]),
     ["1"],
     "sym/PWR01",
+))
+body.append(symbol(
+    "pc_power:PWR_FLAG", "#FLG02", 55.88, 66.04, 0,
+    "\n".join([
+        prop("Reference", "#FLG02", 55.88, 62.23, hide=True),
+        prop("Value", "PWR_FLAG", 55.88, 60.96),
+        prop("Footprint", "", 55.88, 66.04, hide=True),
+        prop("Datasheet", "", 55.88, 66.04, hide=True),
+    ]),
+    ["1"],
+    "sym/FLG02",
 ))
 body.append(symbol(
     "pc_power:PWR_FLAG", "#FLG01", 81.28, 109.22, 0,
@@ -221,7 +246,7 @@ body.append(symbol(
 ))
 
 # ------------------------------------------------------------ trous de fixation
-for i, hx in enumerate([60.96, 76.20, 91.44], start=1):
+for i, hx in enumerate([60.96, 76.20], start=1):
     body.append(symbol(
         "pc_power:MountingHole", f"H{i}", hx, 127.00, 0,
         "\n".join([
@@ -246,12 +271,21 @@ body.append(wire(87.63, 86.36, 87.63, 109.22, "gnd-a"))
 body.append(wire(87.63, 109.22, 60.96, 109.22, "gnd-b"))
 body.append(junction(74.93, 109.22, "gnd-sym"))
 body.append(junction(81.28, 109.22, "pwr-flag"))
+# alimentation par J2 : 5V vers pin 9 du module, GND vers le bus GND
+body.append(wire(48.26, 66.04, 58.42, 66.04, "5v-a"))
+body.append(wire(58.42, 66.04, 58.42, 68.58, "5v-b"))
+body.append(wire(48.26, 63.50, 49.53, 63.50, "gnd-j2-a"))
+body.append(wire(49.53, 63.50, 49.53, 109.22, "gnd-j2-b"))
+body.append(wire(49.53, 109.22, 60.96, 109.22, "gnd-j2-c"))
+body.append(junction(55.88, 66.04, "pwr-flag2"))
+body.append(junction(60.96, 109.22, "gnd-u1"))
 
 # ------------------------------------------------------------------- étiquettes
 body.append(label("OPTO_IN", 72.39, 81.28, "opto-in"))
 body.append(label("OPTO_LED", 84.455, 81.28, "opto-led"))
 body.append(label("PWR_SW_P", 104.14, 81.28, "pwr-sw-p"))
 body.append(label("PWR_SW_N", 103.505, 86.36, "pwr-sw-n"))
+body.append(label("5V", 52.07, 66.04, "5v"))
 
 # ------------------------------------------------------------------------ notes
 body.append(text(
@@ -261,7 +295,7 @@ body.append(text(
     "+ (collecteur) vers la broche PWR_SW de la carte mere, - (emetteur) vers GND du header",
     50.80, 121.92, "note2"))
 body.append(text(
-    "Alimentation du module par son port USB. If(led) = (3,3 V - 1,2 V) / 330 R = 6,4 mA",
+    "Alim : USB du module OU pastilles J2 (5V/GND) - JAMAIS les deux a la fois. If(led) = 6,4 mA",
     50.80, 124.46, "note3"))
 
 libs = "\n".join(
@@ -278,7 +312,7 @@ sch = f"""(kicad_sch
 \t(title_block
 \t\t(title "PC Power Controller - carte optocoupleur")
 \t\t(date "2026-07-13")
-\t\t(rev "1.0")
+\t\t(rev "1.1")
 \t\t(comment 1 "https://github.com/AnMaLeNo/pc-power-controller")
 \t)
 \t(lib_symbols

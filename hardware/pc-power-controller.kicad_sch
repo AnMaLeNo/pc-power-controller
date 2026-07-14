@@ -7,7 +7,7 @@
 	(title_block
 		(title "PC Power Controller - carte optocoupleur")
 		(date "2026-07-13")
-		(rev "1.0")
+		(rev "1.1")
 		(comment 1 "https://github.com/AnMaLeNo/pc-power-controller")
 	)
 	(lib_symbols
@@ -1372,10 +1372,6 @@
 		(uuid "14016e9b-0617-5169-8d7f-ce93793ecfd1")
 	)
 	(no_connect
-		(at 58.42 68.58)
-		(uuid "0db1e71c-1e2c-5068-8932-48140def817a")
-	)
-	(no_connect
 		(at 71.12 88.9)
 		(uuid "d227bf12-bc5e-589f-b7c2-1e1eb5e85b6c")
 	)
@@ -1576,6 +1572,64 @@
 		)
 	)
 	(symbol
+		(lib_id "pc_power:Conn_01x02")
+		(at 43.18 66.04 180)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "7912e42c-e263-5899-b462-fd482918431a")
+		(property "Reference" "J2"
+			(at 43.18 62.23 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "5V_IN"
+			(at 43.18 69.85 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "pc_power:SolderWirePad_1x02_P5.08mm"
+			(at 43.18 66.04 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 43.18 66.04 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "5a1dc70e-7d54-52c2-add5-8659865ce572")
+		)
+		(pin "2"
+			(uuid "f5be4d5a-bcd8-5217-a7a6-0b0f53fead9e")
+		)
+		(instances
+			(project "pc-power-controller"
+				(path "/b8436102-8f01-5e4a-afd4-a0785ad8f56e"
+					(reference "J2")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "pc_power:GND")
 		(at 74.93 109.22 0)
 		(unit 1)
@@ -1626,6 +1680,62 @@
 			(project "pc-power-controller"
 				(path "/b8436102-8f01-5e4a-afd4-a0785ad8f56e"
 					(reference "#PWR01")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "pc_power:PWR_FLAG")
+		(at 55.88 66.04 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "fda041b8-0761-58f1-afa8-39d0c8b2067a")
+		(property "Reference" "#FLG02"
+			(at 55.88 62.23 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "PWR_FLAG"
+			(at 55.88 60.96 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 55.88 66.04 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 55.88 66.04 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "e1335d78-3c73-5bad-83ed-b773b953cb18")
+		)
+		(instances
+			(project "pc-power-controller"
+				(path "/b8436102-8f01-5e4a-afd4-a0785ad8f56e"
+					(reference "#FLG02")
 					(unit 1)
 				)
 			)
@@ -1793,59 +1903,6 @@
 			)
 		)
 	)
-	(symbol
-		(lib_id "pc_power:MountingHole")
-		(at 91.44 127.0 0)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom no)
-		(on_board yes)
-		(dnp no)
-		(uuid "881c4dc0-6db9-5bcd-83ad-4abdd97ad533")
-		(property "Reference" "H3"
-			(at 91.44 130.81 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "M3"
-			(at 91.44 129.54 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Footprint" "pc_power:MountingHole_3.2mm_M3"
-			(at 91.44 127.0 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" "~"
-			(at 91.44 127.0 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(instances
-			(project "pc-power-controller"
-				(path "/b8436102-8f01-5e4a-afd4-a0785ad8f56e"
-					(reference "H3")
-					(unit 1)
-				)
-			)
-		)
-	)
 	(wire
 		(pts
 			(xy 71.12 81.28) (xy 76.2 81.28)
@@ -1938,6 +1995,68 @@
 		(color 0 0 0 0)
 		(uuid "4ead7df1-ca61-537d-8962-d15e74382d07")
 	)
+	(wire
+		(pts
+			(xy 48.26 66.04) (xy 58.42 66.04)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "4680541f-fb40-5d2c-b9d2-7de5dc8787bc")
+	)
+	(wire
+		(pts
+			(xy 58.42 66.04) (xy 58.42 68.58)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "4711eb3e-ee76-5bf3-88a1-0e0d605eb5a4")
+	)
+	(wire
+		(pts
+			(xy 48.26 63.5) (xy 49.53 63.5)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "4e88303e-fa37-5257-9501-623d04a1fc20")
+	)
+	(wire
+		(pts
+			(xy 49.53 63.5) (xy 49.53 109.22)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "4108200d-7042-528e-91ac-32ad880aaacd")
+	)
+	(wire
+		(pts
+			(xy 49.53 109.22) (xy 60.96 109.22)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "c7aeb76e-72f6-502d-a860-27208fab1556")
+	)
+	(junction
+		(at 55.88 66.04)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "fb592661-c69b-5199-ac0e-1816ee4388b9")
+	)
+	(junction
+		(at 60.96 109.22)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "b5937426-fc54-5423-8fd9-6443bd79a3ad")
+	)
 	(label "OPTO_IN"
 		(at 72.39 81.28 0)
 		(effects
@@ -1978,6 +2097,16 @@
 		)
 		(uuid "76cd5e63-285f-522b-b0f8-208d2ab15ada")
 	)
+	(label "5V"
+		(at 52.07 66.04 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "edf3c005-d6bf-59b0-b2cd-640718a0dd58")
+	)
 	(text "Impulsion power : D1 (GPIO5) -> R1 330R -> PC817 -> pastilles PWR_SW"
 		(exclude_from_sim no)
 		(at 50.8 119.38 0)
@@ -2000,7 +2129,7 @@
 		)
 		(uuid "3adb4d16-6721-507d-9981-3f07efeac2c1")
 	)
-	(text "Alimentation du module par son port USB. If(led) = (3,3 V - 1,2 V) / 330 R = 6,4 mA"
+	(text "Alim : USB du module OU pastilles J2 (5V/GND) - JAMAIS les deux a la fois. If(led) = 6,4 mA"
 		(exclude_from_sim no)
 		(at 50.8 124.46 0)
 		(effects

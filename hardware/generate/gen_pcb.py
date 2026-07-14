@@ -4,17 +4,22 @@
 À lancer avec le Python du flatpak KiCad :
   flatpak run --command=python3 org.kicad.KiCad generate/gen_pcb.py
 
-Carte 62 x 46 mm, 2 couches, tout traversant, routée en face avant.
-Le D1 Mini est vertical, USB affleurant le bord bas, antenne vers l'intérieur
-avec une zone dégagée de tout cuivre (y compris en face arrière : aucun plan).
-Les uuid des symboles du schéma sont recalculés ici (uuid5 déterministes) pour
-lier chaque empreinte à son symbole (parité schéma/PCB).
+Carte compacte 54.7 x 35.2 mm, 2 couches, tout traversant.
+Le D1 Mini est vertical à gauche, USB affleurant le bord bas, antenne en haut
+avec une zone sans cuivre. À droite, sur la ligne de D1 : R1 -> PC817 -> J1
+(pastilles PWR_SW) ; en dessous : J2 (pastilles d'alimentation 5V/GND).
+Le retour GND de J2 passe en face arrière (les pads traversants relient les
+deux couches, aucun via nécessaire).
+
+Les extrémités de pistes sont lues depuis les positions réelles des pads
+(pad_xy) : impossible de se tromper de broche. Les uuid des symboles du
+schéma sont recalculés (uuid5 déterministes) pour la parité schéma/PCB.
 """
 import uuid
 from pathlib import Path
 
 import pcbnew
-from pcbnew import VECTOR2I, FromMM
+from pcbnew import VECTOR2I, FromMM, ToMM
 
 HW = Path(__file__).resolve().parent.parent
 LIB = str(HW / "pc_power.pretty")
@@ -38,12 +43,11 @@ board = pcbnew.CreateEmptyBoard()
 tb = board.GetTitleBlock()
 tb.SetTitle("PC Power Controller - carte optocoupleur")
 tb.SetDate("2026-07-13")
-tb.SetRevision("1.0")
+tb.SetRevision("1.1")
 
 # ---------------------------------------------------------------------- nets
-# Les étiquettes locales du schéma donnent des nets préfixés par la hiérarchie
-# ("/OPTO_IN"...) ; GND vient d'un symbole power, donc reste global. Chaque
-# broche non connectée porte un net "unconnected-..." qui doit exister aussi.
+# Étiquettes locales du schéma -> nets préfixés "/" ; GND (symbole power)
+# reste global. Chaque broche non connectée porte un net "unconnected-...".
 UNCONNECTED_U1 = {
     "1": "unconnected-(U1-~{RST}-Pad1)",
     "2": "unconnected-(U1-A0-Pad2)",
@@ -53,7 +57,6 @@ UNCONNECTED_U1 = {
     "6": "unconnected-(U1-MOSI{slash}D7-Pad6)",
     "7": "unconnected-(U1-CS{slash}D8-Pad7)",
     "8": "unconnected-(U1-3V3-Pad8)",
-    "9": "unconnected-(U1-5V-Pad9)",
     "11": "unconnected-(U1-D4-Pad11)",
     "12": "unconnected-(U1-D3-Pad12)",
     "13": "unconnected-(U1-SDA{slash}D2-Pad13)",
@@ -61,7 +64,7 @@ UNCONNECTED_U1 = {
     "16": "unconnected-(U1-TX-Pad16)",
 }
 nets = {}
-for name in (["GND", "/OPTO_IN", "/OPTO_LED", "/PWR_SW_P", "/PWR_SW_N"]
+for name in (["GND", "/5V", "/OPTO_IN", "/OPTO_LED", "/PWR_SW_P", "/PWR_SW_N"]
              + list(UNCONNECTED_U1.values())):
     ni = pcbnew.NETINFO_ITEM(board, name)
     board.Add(ni)
@@ -87,58 +90,78 @@ def place(fp_name, ref, value, x, y, sym_key, pad_nets, datasheet=None):
     return fp
 
 
-# D1 Mini : ancre = pad 1 (colonne gauche, côté antenne).
-# Pad 14 = D1/GPIO5 en (47.43, 45.09), pad 10 = GND en (47.43, 55.25).
-u1 = place("WEMOS_D1_mini_light", "U1", "WEMOS_D1_mini", 24.57, 40.01,
-           "sym/U1", {"14": "/OPTO_IN", "10": "GND", **UNCONNECTED_U1},
+def pad_xy(fp, num):
+    for pad in fp.Pads():
+        if pad.GetNumber() == num:
+            pos = pad.GetPosition()
+            return (round(ToMM(pos.x), 3), round(ToMM(pos.y), 3))
+    raise KeyError(num)
+
+
+# D1 Mini : ancre = pad 1 (colonne gauche, côté antenne). Colonne droite en
+# x = 44.66 : pad 14 = D1/GPIO5 (y 33.78), pad 10 = GND (43.94), pad 9 = 5V (46.48)
+u1 = place("WEMOS_D1_mini_light", "U1", "WEMOS_D1_mini", 21.8, 28.7,
+           "sym/U1", {"14": "/OPTO_IN", "10": "GND", "9": "/5V", **UNCONNECTED_U1},
            datasheet="https://wiki.wemos.cc/products:d1:d1_mini")
-u1.Reference().SetPosition(pt(36.0, 48.0))
-u1.Value().SetPosition(pt(36.0, 51.0))
+u1.Reference().SetPosition(pt(33.0, 45.0))
+u1.Value().SetPosition(pt(33.0, 48.2))
 
-# R1 330R : pad 1 en (53.5, 45.09), pad 2 en (63.66, 45.09)
+# R1 330R sur la ligne de D1
 r1 = place("R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal", "R1", "330R",
-           53.5, 45.09, "sym/R1", {"1": "/OPTO_IN", "2": "/OPTO_LED"})
+           48.9, 33.78, "sym/R1", {"1": "/OPTO_IN", "2": "/OPTO_LED"})
 
-# U2 PC817 : pads 1/2 colonne gauche (anode/cathode), 3/4 colonne droite
-# (émetteur/collecteur). 1 = (68.5, 45.09), 2 = (68.5, 47.63),
-# 3 = (76.12, 47.63), 4 = (76.12, 45.09)
-u2 = place("DIP-4_W7.62mm", "U2", "PC817", 68.5, 45.09, "sym/U2",
+# U2 PC817 : 1 = anode, 2 = cathode (gauche) ; 3 = émetteur, 4 = collecteur (droite)
+u2 = place("DIP-4_W7.62mm", "U2", "PC817", 61.6, 33.78, "sym/U2",
            {"1": "/OPTO_LED", "2": "GND", "3": "/PWR_SW_N", "4": "/PWR_SW_P"},
            datasheet="http://www.soselectronic.cz/a_info/resource/d/pc817.pdf")
 
-# J1 pastilles à souder : pad 1 (+, collecteur) en (79.5, 45.09),
-# pad 2 (-, émetteur) en (79.5, 50.17)
-j1 = place("SolderWirePad_1x02_P5.08mm", "J1", "PWR_SW", 79.5, 45.09,
+# J1 pastilles PWR_SW : pad 1 (+, collecteur), pad 2 (-, émetteur)
+j1 = place("SolderWirePad_1x02_P5.08mm", "J1", "PWR_SW", 72.5, 33.78,
            "sym/J1", {"1": "/PWR_SW_P", "2": "/PWR_SW_N"})
 
-# Trous de fixation M3
-for i, (hx, hy) in enumerate([(25, 25), (77, 25), (77, 61)], start=1):
+# J2 pastilles alimentation : pad 1 (+, 5V), pad 2 (-, GND)
+j2 = place("SolderWirePad_1x02_P5.08mm", "J2", "5V_IN", 72.5, 45.5,
+           "sym/J2", {"1": "/5V", "2": "GND"})
+j2.Reference().SetPosition(pt(68.9, 44.2))
+
+# Trous de fixation M3 sur le bandeau haut
+for i, (hx, hy) in enumerate([(52, 24.3), (70.5, 24.3)], start=1):
     h = place("MountingHole_3.2mm_M3", f"H{i}", "M3", hx, hy, f"sym/H{i}", {})
     h.Reference().SetVisible(False)
 
 # --------------------------------------------------------------------- pistes
-def track(x1, y1, x2, y2, net, width=0.8):
+def track(a, b, net, layer=pcbnew.F_Cu, width=0.8):
     t = pcbnew.PCB_TRACK(board)
-    t.SetStart(pt(x1, y1))
-    t.SetEnd(pt(x2, y2))
+    t.SetStart(pt(*a))
+    t.SetEnd(pt(*b))
     t.SetWidth(mm(width))
-    t.SetLayer(pcbnew.F_Cu)
+    t.SetLayer(layer)
     t.SetNet(nets[net])
     board.Add(t)
 
 
-track(47.43, 45.09, 53.50, 45.09, "/OPTO_IN")          # D1 -> R1
-track(63.66, 45.09, 68.50, 45.09, "/OPTO_LED")         # R1 -> anode PC817
-track(47.43, 55.25, 60.88, 55.25, "GND")               # GND module -> ...
-track(60.88, 55.25, 68.50, 47.63, "GND")               # ... -> cathode (45°)
-track(76.12, 45.09, 79.50, 45.09, "/PWR_SW_P")         # collecteur -> pad +
-track(76.12, 47.63, 79.50, 50.17, "/PWR_SW_N")         # émetteur -> pad -
+B = pcbnew.B_Cu
+
+# D1 -> R1 -> anode PC817 (face avant, ligne y = 33.78)
+track(pad_xy(u1, "14"), pad_xy(r1, "1"), "/OPTO_IN")
+track(pad_xy(r1, "2"), pad_xy(u2, "1"), "/OPTO_LED")
+# GND module -> cathode PC817 (face avant, horizontal puis 45°)
+track(pad_xy(u1, "10"), (53.98, 43.94), "GND")
+track((53.98, 43.94), pad_xy(u2, "2"), "GND")
+# sorties optocoupleur -> pastilles PWR_SW
+track(pad_xy(u2, "4"), pad_xy(j1, "1"), "/PWR_SW_P")
+track(pad_xy(u2, "3"), pad_xy(j1, "2"), "/PWR_SW_N")
+# alimentation : 5V en face avant, retour GND de J2 en face arrière
+track(pad_xy(u1, "9"), (71.52, 46.48), "/5V")
+track((71.52, 46.48), pad_xy(j2, "1"), "/5V")
+track(pad_xy(u1, "10"), (51.30, 50.58), "GND", layer=B)
+track((51.30, 50.58), pad_xy(j2, "2"), "GND", layer=B)
 
 # ------------------------------------------------------------------- contour
-# Rectangle 62 x 46.5 mm (20,20)-(82,66.5), coins arrondis r = 3 mm.
-# Le bord bas laisse 0,5 mm après le corps du module (sérigraphie comprise).
+# Rectangle 54.7 x 35.2 mm (20,20)-(74.7,55.2), coins arrondis r = 3 mm.
+# Bord bas : 0,5 mm après le corps du module (USB affleurant).
 EDGE_W = 0.1
-K = 2.12132  # r * sin(45°)
+K = 0.87868  # r - r*sin(45°)
 
 
 def edge_seg(x1, y1, x2, y2):
@@ -160,14 +183,15 @@ def edge_arc(sx, sy, mx, my, ex, ey):
     board.Add(s)
 
 
-edge_seg(23, 20, 79, 20)                                   # haut
-edge_arc(79, 20, 82 - 0.87868, 20.87868, 82, 23)           # coin haut droit
-edge_seg(82, 23, 82, 63.5)                                 # droite
-edge_arc(82, 63.5, 82 - 0.87868, 65.62132, 79, 66.5)       # coin bas droit
-edge_seg(79, 66.5, 23, 66.5)                               # bas
-edge_arc(23, 66.5, 20.87868, 65.62132, 20, 63.5)           # coin bas gauche
-edge_seg(20, 63.5, 20, 23)                                 # gauche
-edge_arc(20, 23, 20.87868, 20.87868, 23, 20)               # coin haut gauche
+L, R_, T, Bo = 20.0, 74.7, 20.0, 55.2
+edge_seg(L + 3, T, R_ - 3, T)                              # haut
+edge_arc(R_ - 3, T, R_ - K, T + K, R_, T + 3)              # coin haut droit
+edge_seg(R_, T + 3, R_, Bo - 3)                            # droite
+edge_arc(R_, Bo - 3, R_ - K, Bo - K, R_ - 3, Bo)           # coin bas droit
+edge_seg(R_ - 3, Bo, L + 3, Bo)                            # bas
+edge_arc(L + 3, Bo, L + K, Bo - K, L, Bo - 3)              # coin bas gauche
+edge_seg(L, Bo - 3, L, T + 3)                              # gauche
+edge_arc(L, T + 3, L + K, T + K, L + 3, T)                 # coin haut gauche
 
 # ------------------------------------------------------------------ sérigraphie
 def silk(txt, x, y, size, thickness):
@@ -181,11 +205,12 @@ def silk(txt, x, y, size, thickness):
     return t
 
 
-silk("PC POWER", 63.0, 25.5, 2.0, 0.4)
-silk("CONTROLLER v1.0", 63.0, 29.0, 1.2, 0.22)
-silk("PWR_SW", 70.5, 53.0, 1.0, 0.15)
-silk("D1", 50.5, 43.6, 0.8, 0.13)
-silk("GND", 51.2, 56.7, 0.8, 0.13)
+silk("PC POWER v1.1", 57.5, 29.8, 1.0, 0.15)
+silk("D1", 47.3, 32.5, 0.8, 0.13)
+silk("GND", 47.6, 42.6, 0.8, 0.13)
+silk("5V", 47.3, 47.9, 0.8, 0.13)
+silk("PWR_SW", 67.0, 41.5, 0.8, 0.13)
+silk("5V IN", 66.6, 53.6, 0.8, 0.13)
 
 pcbnew.SaveBoard(OUT, board)
 print(f"OK -> {OUT}")
