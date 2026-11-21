@@ -31,6 +31,30 @@ Le projet est divisé en quatre composants majeurs :
 3. **Broker MQTT (Eclipse Mosquitto) :** Agit comme un intermédiaire léger pour distribuer les messages entre l'API et le hardware. C'est une infrastructure **partagée** entre tous les projets IoT du Raspberry (un seul broker par machine) : il vit dans le dépôt `~/mosquitto`, et ce projet s'y connecte en simple client via `host.docker.internal:1883` (surchargeable par `.env` : `MQTT_HOST`, `MQTT_PORT`).
 4. **Firmware ESP8266 (C++ / Arduino) :** Connecté au réseau WiFi local, il s'abonne au topic MQTT. À la réception d'un message, il déclenche une impulsion (High/Low) d'une durée spécifique (300ms pour un appui court, 6000ms pour un appui long) sur la broche `D1` reliée à l'optocoupleur.
 
+## Choix du système au démarrage
+
+Le PC héberge plusieurs systèmes (Windows, Ubuntu, un Ubuntu dédié à un agent IA). Un petit programme côté PC, le « sélecteur de démarrage » (développé à part), s'exécute à chaque mise sous tension, lit le système souhaité sur le broker MQTT et redémarre dessus. L'application permet de formuler ce souhait à distance et de voir ce que le sélecteur en a fait. L'état vit uniquement dans des messages MQTT retenus : ni base de données ni fichier.
+
+**Topics** (préfixe `bureau/pc/boot` par défaut, messages retenus, QoS 1) :
+
+| Topic | Écrit par | Payload |
+| --- | --- | --- |
+| `<préfixe>/target` | l'API | Texte brut, un identifiant de système : `windows`, `ubuntu` ou `agent`. Signifie « démarrer sur ce système désormais » et reste en place jusqu'au prochain changement. |
+| `<préfixe>/status` | le sélecteur | JSON : `{"event":"selected","target":"<id>","source":"mqtt"}` quand il a suivi le souhait, ou `{"event":"selected","target":"<id>","source":"fallback","reason":"<texte court>"}` quand il n'a pas pu le lire et a pris son choix par défaut. Un payload non JSON est relayé en texte brut. |
+
+**Variables d'environnement de l'API** (surchargeables par `.env`) :
+
+| Variable | Défaut | Rôle |
+| --- | --- | --- |
+| `BOOT_TOPIC_PREFIX` | `bureau/pc/boot` | Préfixe des deux topics. |
+| `BOOT_SYSTEMS` | `windows:Windows,ubuntu:Ubuntu,agent:Agent` | Systèmes proposés, liste de paires `id:Libellé` séparées par des virgules (`id` en `[a-z0-9-]+`). Une liste invalide empêche l'API de démarrer. |
+
+**Endpoints** :
+
+- `GET /api/boot` → `{ "target": "<id>" | null, "systems": [{ "id", "label" }], "status": { ... } | null, "mqtt": "connected" | "disconnected" }`. `target` vaut `null` tant que le broker ne détient aucun souhait. `status` est le dernier compte rendu du sélecteur, complété par l'API de `timestamp` (heure de réception) et de `retained` (`true` si le compte rendu était déjà sur le broker quand l'API s'y est abonnée : son heure réelle est alors inconnue, antérieure à `timestamp`).
+- `PUT /api/boot` avec `{ "target": "<id>" }` → publie le souhait retenu. `200 { status, target, topic, timestamp }`, `400` si l'identifiant est inconnu, `503 { error, code: "MQTT_DISCONNECTED" }` si le broker est injoignable, `502` si la publication échoue.
+- `GET /api/events` (SSE) relaie en plus `{ "event": "boot_target", "target", "timestamp" }` à chaque changement du souhait, d'où qu'il vienne, et `{ "event": "boot_status", "selector_event", "target", "source", "reason"?, "timestamp", "retained" }` à chaque compte rendu (`selector_event` reprend le champ `event` du sélecteur). Les dernières valeurs connues sont rejouées à chaque nouveau client.
+
 ## Installation & Lancement
 
 ### 1. Configuration du Hardware (ESP8266)
