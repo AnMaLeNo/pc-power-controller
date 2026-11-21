@@ -393,6 +393,91 @@ button:focus-visible {
   font-weight: 600;
 }
 
+/* ────────────────────────── Système au démarrage ────────────────────────── */
+
+.boot-body {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+}
+
+.boot-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.boot-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 600;
+  transition:
+    color 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.boot-option svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+}
+
+.boot-option:hover:not(:disabled, .selected),
+.boot-option:focus-visible:not(.selected) {
+  border-color: var(--ghost-hover-border);
+  background: var(--ghost-hover-bg);
+  color: var(--text);
+}
+
+.boot-option.selected {
+  border-color: rgb(var(--accent-rgb) / 40%);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.boot-option:disabled {
+  opacity: 0.6;
+}
+
+.boot-note {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.boot-note.warning {
+  color: var(--pending);
+}
+
+.boot-note.error {
+  color: var(--danger);
+}
+
+.boot-report {
+  border-top: 1px solid var(--border-soft);
+}
+
+/* Le compte rendu est une phrase : on la laisse passer à la ligne plutôt que
+   de la tronquer comme les lignes de journal. */
+.boot-report .row-line strong,
+.boot-report small {
+  white-space: normal;
+}
+
+.boot-report-empty {
+  padding: 14px 18px;
+  color: var(--faint);
+  font-size: 0.8rem;
+}
+
 /* ────────────────────────── Journaux ────────────────────────── */
 
 .panels {
@@ -462,6 +547,10 @@ button:focus-visible {
 
 .row-dot.error {
   background: var(--danger);
+}
+
+.row-dot.warning {
+  background: var(--pending);
 }
 
 .row-body {

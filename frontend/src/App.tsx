@@ -1,5 +1,5 @@
-import { LoaderCircle, Moon, Power, ShieldAlert, Sun } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Check, LoaderCircle, Moon, Power, ShieldAlert, Sun } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type PowerAction = 'SHORT_PRESS' | 'LONG_PRESS';
 type RequestState = 'idle' | 'pending' | 'success' | 'error';
@@ -63,6 +63,43 @@ type EspEvent = {
   timestamp: string;
 };
 
+// ── Système de démarrage ──
+type BootSystem = { id: string; label: string };
+
+// Compte rendu du sélecteur de démarrage tel que servi par GET /api/boot.
+// `timestamp` est l'heure de réception par l'API ; `retained` signale un compte
+// rendu déjà présent sur le broker quand l'API s'y est abonnée (heure réelle
+// inconnue, antérieure au timestamp).
+type BootReport = {
+  event: string;
+  target?: string;
+  source?: string;
+  reason?: string;
+  message?: string;
+  timestamp: string;
+  retained?: boolean;
+};
+
+type BootState = {
+  target: string | null;
+  systems: BootSystem[];
+  status: BootReport | null;
+  mqtt: 'connected' | 'disconnected';
+};
+
+type BootTargetEvent = { event: 'boot_target'; target: string | null; timestamp: string };
+// En SSE, `event` sert d'aiguillage : le champ `event` du sélecteur est porté
+// par `selector_event` (null = compte rendu effacé du broker).
+type BootStatusEvent = Omit<BootReport, 'event'> & {
+  event: 'boot_status';
+  selector_event: string | null;
+};
+type ServerEvent = EspEvent | BootTargetEvent | BootStatusEvent;
+
+type BootRequestResult =
+  | { ok: true; target: string }
+  | { ok: false; message: string; brokerDown: boolean };
+
 const errorReasons: Record<string, string> = {
   pulse_already_active: 'Impulsion déjà en cours',
   unknown_command: 'Commande inconnue',
@@ -89,6 +126,77 @@ const timeFormatter = new Intl.DateTimeFormat('fr-FR', {
   minute: '2-digit',
   second: '2-digit'
 });
+
+const dayFormatter = new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: '2-digit' });
+const hourFormatter = new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+// Transforme le compte rendu du sélecteur en phrases lisibles.
+function describeBootReport(
+  report: BootReport,
+  systems: BootSystem[]
+): { title: string; detail: string; when: string; tone: 'success' | 'warning' } {
+  const date = new Date(report.timestamp);
+  const moment = `le ${dayFormatter.format(date)} à ${hourFormatter.format(date)}`;
+  const when = report.retained ? `avant ${moment}` : moment;
+  const precision = report.retained ? ' · heure exacte inconnue' : '';
+
+  if (report.event === 'selected' && report.target) {
+    const label = systems.find((system) => system.id === report.target)?.label ?? report.target;
+    const title = `Le sélecteur a choisi ${label}`;
+    if (report.source === 'mqtt') {
+      return { title, detail: `Souhait suivi${precision}`, when, tone: 'success' };
+    }
+    if (report.source === 'fallback') {
+      return {
+        title,
+        detail: `Choix de secours, souhait non lu : ${report.reason ?? 'raison non précisée'}${precision}`,
+        when,
+        tone: 'warning'
+      };
+    }
+    return { title, detail: `Origine du choix inconnue${precision}`, when, tone: 'warning' };
+  }
+
+  return {
+    title: 'Compte rendu non reconnu',
+    detail: `${report.message ?? report.event}${precision}`,
+    when,
+    tone: 'warning'
+  };
+}
+
+async function fetchBootState(): Promise<BootState> {
+  const response = await fetch('/api/boot');
+  if (!response.ok) throw new Error(`Erreur HTTP ${response.status}`);
+  return (await response.json()) as BootState;
+}
+
+async function sendBootTarget(target: string): Promise<BootRequestResult> {
+  try {
+    const response = await fetch('/api/boot', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ target })
+    });
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        message:
+          payload && typeof payload.error === 'string'
+            ? payload.error
+            : `Erreur HTTP ${response.status}`,
+        brokerDown: payload?.code === 'MQTT_DISCONNECTED'
+      };
+    }
+    return { ok: true, target: typeof payload?.target === 'string' ? payload.target : target };
+  } catch {
+    return { ok: false, message: 'API injoignable', brokerDown: false };
+  }
+}
 
 async function sendPowerCommand(action: PowerAction): Promise<ApiSuccess> {
   const response = await fetch('/api/power', {
@@ -126,6 +234,46 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
 
+  // Système de démarrage. `bootLoad` suit la lecture de GET /api/boot ; le
+  // souhait et le compte rendu sont ensuite tenus à jour par le flux SSE.
+  const [bootLoad, setBootLoad] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [bootSystems, setBootSystems] = useState<BootSystem[]>([]);
+  const [bootTarget, setBootTarget] = useState<string | null>(null);
+  const [bootReport, setBootReport] = useState<BootReport | null>(null);
+  const [brokerDown, setBrokerDown] = useState(false);
+  const [bootPending, setBootPending] = useState<string | null>(null);
+  const [bootError, setBootError] = useState<string | null>(null);
+  const streamOpenedRef = useRef(false);
+
+  const loadBoot = useCallback(async () => {
+    try {
+      const state = await fetchBootState();
+      setBootSystems(state.systems);
+      setBootTarget(state.target);
+      setBootReport(state.status);
+      setBrokerDown(state.mqtt !== 'connected');
+      // API et broker répondent : l'échec d'une demande passée n'est plus d'actualité.
+      if (state.mqtt === 'connected') setBootError(null);
+      setBootLoad('ready');
+    } catch {
+      // On garde le dernier état affiché s'il existe ; sinon on signale l'échec.
+      setBootLoad((current) => (current === 'ready' ? current : 'error'));
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadBoot();
+  }, [loadBoot]);
+
+  // Tant que l'état n'a pas pu être lu, que le broker est annoncé indisponible
+  // ou que le flux SSE est coupé, on réinterroge l'API : l'affichage se corrige
+  // tout seul au lieu de rester figé sur une valeur périmée.
+  useEffect(() => {
+    if (bootLoad === 'ready' && !brokerDown && streamConnected) return;
+    const timer = window.setInterval(() => void loadBoot(), 10000);
+    return () => window.clearInterval(timer);
+  }, [bootLoad, brokerDown, streamConnected, loadBoot]);
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document
@@ -142,13 +290,29 @@ export default function App() {
   useEffect(() => {
     const source = new EventSource('/api/events');
 
-    source.onopen = () => setStreamConnected(true);
+    source.onopen = () => {
+      setStreamConnected(true);
+      // Reconnexion du flux : des événements ont pu être manqués entre-temps.
+      if (streamOpenedRef.current) void loadBoot();
+      streamOpenedRef.current = true;
+    };
 
     source.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data) as EspEvent;
+        const data = JSON.parse(event.data) as ServerEvent;
         if (data.event === 'status') {
           setDeviceOnline(data.online === true);
+          return;
+        }
+        if (data.event === 'boot_target') {
+          setBootTarget(data.target);
+          // Le souhait vient de changer : l'échec d'une demande passée est caduc.
+          setBootError(null);
+          return;
+        }
+        if (data.event === 'boot_status') {
+          const { selector_event: selectorEvent, ...report } = data;
+          setBootReport(selectorEvent === null ? null : { ...report, event: selectorEvent });
           return;
         }
         const { label, isError } = describeEspEvent(data);
@@ -178,7 +342,7 @@ export default function App() {
     source.onerror = () => setStreamConnected(false);
 
     return () => source.close();
-  }, []);
+  }, [loadBoot]);
 
   // Modale : focus initial sur « Annuler » et fermeture via Échap.
   useEffect(() => {
@@ -226,7 +390,60 @@ export default function App() {
     }
   };
 
+  const chooseBootTarget = async (id: string) => {
+    if (bootPending) return;
+    setBootPending(id);
+    setBootError(null);
+
+    const result = await sendBootTarget(id);
+    if (result.ok) {
+      setBootTarget(result.target);
+      setBrokerDown(false);
+    } else {
+      setBootError(result.message);
+      if (result.brokerDown) setBrokerDown(true);
+    }
+    setBootPending(null);
+  };
+
   const isBusy = requestState === 'pending';
+
+  const bootTargetLabel =
+    bootSystems.find((system) => system.id === bootTarget)?.label ?? null;
+
+  // Une seule ligne d'état sous les boutons, du plus urgent au plus banal.
+  const bootNote: { tone: 'error' | 'warning' | 'idle'; text: string } = (() => {
+    if (bootError) {
+      return { tone: 'error', text: `Souhait non enregistré : ${bootError}` };
+    }
+    if (bootLoad === 'loading') {
+      return { tone: 'idle', text: 'Lecture du souhait…' };
+    }
+    if (bootLoad === 'error') {
+      return { tone: 'error', text: 'Souhait inconnu : API injoignable' };
+    }
+    if (brokerDown) {
+      return {
+        tone: 'warning',
+        text:
+          bootTarget === null
+            ? 'Souhait inconnu : broker MQTT indisponible'
+            : `Broker MQTT indisponible — dernier souhait connu : ${bootTargetLabel ?? bootTarget}`
+      };
+    }
+    if (bootTarget === null) {
+      return { tone: 'idle', text: 'Aucun souhait enregistré pour l\'instant' };
+    }
+    if (bootTargetLabel === null) {
+      return {
+        tone: 'warning',
+        text: `Le broker détient un souhait hors liste : « ${bootTarget} »`
+      };
+    }
+    return { tone: 'idle', text: `Le PC démarrera sur ${bootTargetLabel} jusqu'à nouveau choix` };
+  })();
+
+  const bootReportView = bootReport ? describeBootReport(bootReport, bootSystems) : null;
 
   const controllerStatusLabel =
     deviceOnline === null
@@ -337,6 +554,61 @@ export default function App() {
             Forcer l'arrêt
             <span className="force-tag">{actionDurations.LONG_PRESS}</span>
           </button>
+        </section>
+
+        <section className="panel" aria-labelledby="boot-title">
+          <header className="panel-heading">
+            <h2 id="boot-title">Système au démarrage</h2>
+          </header>
+          <div className="boot-body">
+            {bootSystems.length > 0 && (
+              <div className="boot-options" role="group" aria-label="Système souhaité au démarrage">
+                {bootSystems.map((system) => {
+                  const selected = system.id === bootTarget;
+                  return (
+                    <button
+                      key={system.id}
+                      type="button"
+                      className={`boot-option ${selected ? 'selected' : ''}`}
+                      aria-pressed={selected}
+                      disabled={bootPending !== null}
+                      onClick={() => void chooseBootTarget(system.id)}
+                    >
+                      {bootPending === system.id ? (
+                        <LoaderCircle className="spin" aria-hidden="true" />
+                      ) : selected ? (
+                        <Check aria-hidden="true" />
+                      ) : null}
+                      {system.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <p className={`boot-note ${bootNote.tone}`} role="status" aria-live="polite">
+              {bootNote.text}
+            </p>
+          </div>
+          {bootReportView ? (
+            <ul className="rows boot-report">
+              <li>
+                <span className={`row-dot ${bootReportView.tone}`} aria-hidden="true" />
+                <div className="row-body">
+                  <div className="row-line">
+                    <strong>{bootReportView.title}</strong>
+                    <time>{bootReportView.when}</time>
+                  </div>
+                  <small>{bootReportView.detail}</small>
+                </div>
+              </li>
+            </ul>
+          ) : (
+            // Broker indisponible : l'absence de compte rendu ne prouve rien, on se tait.
+            bootLoad === 'ready' &&
+            !brokerDown && (
+              <p className="boot-report boot-report-empty">Aucun compte rendu du sélecteur</p>
+            )
+          )}
         </section>
 
         <div className="panels">
