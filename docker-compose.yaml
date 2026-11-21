@@ -12,6 +12,9 @@ services:
       # Surchargeable via un fichier .env (MQTT_HOST=..., MQTT_PORT=...).
       - MQTT_HOST=${MQTT_HOST:-host.docker.internal}
       - MQTT_PORT=${MQTT_PORT:-1883}
+      # Système de démarrage (cf. README) : préfixe des topics et systèmes proposés.
+      - BOOT_TOPIC_PREFIX=${BOOT_TOPIC_PREFIX:-bureau/pc/boot}
+      - BOOT_SYSTEMS=${BOOT_SYSTEMS:-windows:Windows,ubuntu:Ubuntu,agent:Agent}
       - PORT=3000
       - NODE_ENV=production
     extra_hosts:
